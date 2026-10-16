@@ -24,8 +24,8 @@ backend serves the build from `FRONTEND_DIST`: its files, and `index.html` for e
    doesn't keep (`with_direct_pool` in `database/pool.js`). Without `DATABASE_URL_UNPOOLED` everything uses
    `DATABASE_URL`, as with local Postgres.
 2. **Service.** In [Render](https://dashboard.render.com), sign in with GitHub, then *New → Blueprint* and pick
-   `ijabir28/sequence-board-game-backend`. Render reads [render.yaml](../render.yaml): a free Docker web service on
-   branch `version-2`, health check `/health`, a generated `SESSION_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`.
+   `ijabir28/sequence-board-game-backend`. Render reads [render.yaml](../render.yaml): a free Docker web service in Ohio
+   (next to the database), on branch `version-2`, health check `/health`, a generated `SESSION_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`.
 3. Paste `DATABASE_URL` and `DATABASE_URL_UNPOOLED` from `.env.local` when it asks, and apply.
 4. The first start applies the migrations. Open `https://<service>.onrender.com`, create an account and play a game
    from two browsers.
