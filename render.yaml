@@ -1,0 +1,19 @@
+# Render Blueprint: one free web service built from the Dockerfile. See docs/deploy.md.
+services:
+  - type: web
+    name: sequence-board-game
+    runtime: docker
+    plan: free
+    branch: version-2
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      # Neon's *direct* connection string (not the -pooler one): migrations hold a session-level advisory lock.
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: TRUST_PROXY
+        value: "1"

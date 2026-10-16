@@ -12,3 +12,8 @@ docker compose up
 This starts PostgreSQL, this backend on http://localhost:3000 and the frontend on http://localhost:5173.
 See [docs/architecture.md](docs/architecture.md#run) for running parts of it on the host, and [docs/](docs/README.md)
 for the rest of the documentation.
+
+## Deployment
+
+Render (free web service, from the [Dockerfile](Dockerfile)) plus Neon (free PostgreSQL); the backend serves the
+built frontend on the same origin. Step by step in [docs/deploy.md](docs/deploy.md).
