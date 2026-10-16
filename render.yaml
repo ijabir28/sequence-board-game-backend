@@ -8,8 +8,11 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
-      # Neon's *direct* connection string (not the -pooler one): migrations hold a session-level advisory lock.
+      # Both from Neon (`neon env pull` writes them to .env.local): the pooled one (-pooler host) for the app,
+      # the direct one for migrations, which hold a session-level advisory lock the pooler doesn't keep.
       - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
         sync: false
       - key: SESSION_SECRET
         generateValue: true

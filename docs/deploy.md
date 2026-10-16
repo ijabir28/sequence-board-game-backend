@@ -17,13 +17,16 @@ backend serves the build from `FRONTEND_DIST`: its files, and `index.html` for e
 
 ## First deploy
 
-1. **Database.** Create a project at [neon.tech](https://neon.tech). From *Connect*, copy the connection string
-   with **connection pooling turned off** (the host has no `-pooler`): migrations hold a session-level advisory lock,
-   which the pooler doesn't keep. Keep `?sslmode=require` on the end.
+1. **Database.** The Neon project is linked in `neon.ts` / `.neon` (project `dry-star-85571538`, branch
+   `production`). `neon deploy` applies `neon.ts` and writes the branch's connection strings to `.env.local`
+   (git-ignored): `DATABASE_URL`, the pooled one (`-pooler` host) the app queries through, and
+   `DATABASE_URL_UNPOOLED`, the direct one migrations use, since they hold a session-level advisory lock the pooler
+   doesn't keep (`with_direct_pool` in `database/pool.js`). Without `DATABASE_URL_UNPOOLED` everything uses
+   `DATABASE_URL`, as with local Postgres.
 2. **Service.** In [Render](https://dashboard.render.com), sign in with GitHub, then *New → Blueprint* and pick
    `ijabir28/sequence-board-game-backend`. Render reads [render.yaml](../render.yaml): a free Docker web service on
    branch `version-2`, health check `/health`, a generated `SESSION_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`.
-3. Paste the Neon string when it asks for `DATABASE_URL`, and apply.
+3. Paste `DATABASE_URL` and `DATABASE_URL_UNPOOLED` from `.env.local` when it asks, and apply.
 4. The first start applies the migrations. Open `https://<service>.onrender.com`, create an account and play a game
    from two browsers.
 
@@ -41,12 +44,25 @@ when `NODE_ENV=production`, which the image sets).
 
 | Variable | Set by | Purpose |
 |---|---|---|
-| `DATABASE_URL` | you (Neon) | PostgreSQL, direct connection |
+| `DATABASE_URL` | you (Neon) | PostgreSQL for the app, pooled connection |
+| `DATABASE_URL_UNPOOLED` | you (Neon) | Direct connection, for migrations |
 | `SESSION_SECRET` | Render (generated) | Signs session cookies and socket presence tokens; changing it signs everyone out |
 | `COOKIE_SECURE` | render.yaml | Cookies only over HTTPS |
 | `TRUST_PROXY` | render.yaml | Hops of reverse proxy in front, so the sign-in rate limit sees the client's IP |
 | `NODE_ENV`, `FRONTEND_DIST` | Dockerfile | Production mode; where the built frontend is |
 | `PORT` | Render | Port to listen on |
+
+## Running locally against Neon
+
+`.env.local` isn't loaded by `npm start` (so local work never touches production by accident); pass it explicitly:
+
+```bash
+NODE_OPTIONS=--network-family-autoselection-attempt-timeout=2000 node --env-file=.env.local bin/www
+```
+
+The `NODE_OPTIONS` part is only needed on a network without IPv6 and far from `us-east-2`: Node gives each of the
+host's addresses 250 ms, an IPv4 handshake from there takes longer, and every attempt fails with `ETIMEDOUT`.
+Don't run `npm run db:seed` this way: it would create the development accounts in production.
 
 ## Trying the image locally
 
