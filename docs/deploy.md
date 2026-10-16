@@ -36,9 +36,10 @@ when `NODE_ENV=production`, which the image sets).
 ## Updating
 
 - **Backend:** pushing to `version-2` redeploys.
-- **Frontend:** pushing the frontend doesn't tell Render. Redeploy with *Manual Deploy → Deploy latest commit*; the
-  image picks up the frontend's latest `dev` commit. To automate it, copy the service's *Deploy Hook* URL and call it
-  from a GitHub Action in the frontend repo, keeping the URL in a repository secret.
+- **Frontend:** pushing to `dev` runs the frontend's `.github/workflows/deploy.yml`: tests and build, then it calls the
+  service's *Deploy Hook* (Render → service → Settings), kept in the frontend repo's secret `RENDER_DEPLOY_HOOK_URL`.
+  The image picks up the frontend's latest `dev` commit. *Manual Deploy → Deploy latest commit* does the same by hand.
+  Recreating the service gives it a new hook: update the secret.
 
 ## Environment
 
