@@ -10,6 +10,7 @@ the project without reading the source.
 | [api.md](api.md) | HTTP endpoints and Socket.IO events (the frontend contract) |
 | [game-domain.md](game-domain.md) | Cards, board layout, rules the code enforces and rules it doesn't |
 | [known-issues.md](known-issues.md) | Bugs and gaps confirmed by running the server |
+| [deploy.md](deploy.md) | Free production deploy: Render + Neon, one origin for frontend and backend |
 
 ## In one paragraph
 
@@ -32,3 +33,4 @@ dead cards, sequences, winning). An older global test game (`controller/game.js`
 | Persistence | Accounts, sessions, rooms, seats, settings, games and turn history (only the legacy dev game is in memory) |
 | CORS | Not configured |
 | Local environment | `docker compose up` (Postgres, backend, frontend), see [architecture.md](architecture.md#run) |
+| Production | Render + Neon, frontend served by the backend, see [deploy.md](deploy.md) |

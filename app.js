@@ -24,6 +24,13 @@ if (process.env.NODE_ENV !== 'test') {
 }
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+// In production the built React frontend (FRONTEND_DIST, see Dockerfile) is served from here too, so the page,
+// the API and the socket share one origin and the session cookie needs no CORS. It comes before `public` so
+// its index.html wins over the legacy page.
+const frontend_dist = process.env.FRONTEND_DIST && path.resolve(process.env.FRONTEND_DIST);
+if (frontend_dist) {
+    app.use(express.static(frontend_dist));
+}
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session_middleware);
 
@@ -41,5 +48,15 @@ app.use('/user', user_router);
 app.use('/room', room_router);
 app.use('/game', game_router);
 app.use('/board', board_router);
+
+// Any other page (/lobby, /table/:id, ...) is a frontend route: hand back the app and let its router take over.
+if (frontend_dist) {
+    app.get('*', function (req, res, next) {
+        if (!req.accepts('html')) {
+            return next();
+        }
+        res.sendFile(path.join(frontend_dist, 'index.html'));
+    });
+}
 
 module.exports = app;
