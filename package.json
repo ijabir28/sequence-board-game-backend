@@ -26,6 +26,8 @@
     "vue": "^2.6.11"
   },
   "devDependencies": {
+    "@neon/config": "^1.9.2",
+    "@neon/env": "^1.6.3",
     "colors": "^1.4.0",
     "jest": "30.5.2",
     "nodemon": "3.1.14",

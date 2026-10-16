@@ -5,7 +5,7 @@
  */
 const app = require('../app');
 const {socket} = require('../socket');
-const {pool} = require('../database/pool');
+const {with_direct_pool} = require('../database/pool');
 const {migrate} = require('../database/migrate');
 const {start_turn_timer, presence_changed} = require('../controller/room_game');
 const presence = require('../controller/presence');
@@ -29,7 +29,9 @@ socket.attach(server);
  * Without a database the server cannot do anything useful, so it refuses to start.
  */
 
-migrate({pool})
+with_direct_pool(function (pool) {
+    return migrate({pool});
+})
     .then(function () {
         // Plays a random card for anyone whose turn timer runs out, including games resumed after a restart.
         start_turn_timer();

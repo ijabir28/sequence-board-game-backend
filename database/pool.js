@@ -34,4 +34,19 @@ async function transaction(action) {
     }
 }
 
-module.exports = {pool, ping, transaction};
+// Migrations hold a session-level advisory lock, which a transaction-mode pooler such as Neon's `-pooler` host doesn't
+// keep, so they connect directly when DATABASE_URL_UNPOOLED is set (`neon env pull` writes it next to DATABASE_URL).
+// Without it they share the app's pool. A pool opened here is closed again afterwards.
+async function with_direct_pool(action) {
+    if (!process.env.DATABASE_URL_UNPOOLED) {
+        return action(pool);
+    }
+    const direct = new Pool({connectionString: process.env.DATABASE_URL_UNPOOLED});
+    try {
+        return await action(direct);
+    } finally {
+        await direct.end();
+    }
+}
+
+module.exports = {pool, ping, transaction, with_direct_pool};

@@ -2,7 +2,7 @@
 // Applies migrations first, and only creates accounts that don't exist yet, so it is safe to re-run.
 // These passwords are below the sign-up minimum on purpose (they predate it and the docs use them),
 // which is also why this script must never run against a production database.
-const {pool} = require('./pool');
+const {pool, with_direct_pool} = require('./pool');
 const {migrate} = require('./migrate');
 const {hash_password} = require('../entity/user');
 
@@ -15,7 +15,9 @@ async function seed() {
     if (process.env.NODE_ENV === 'production') {
         throw new Error('Refusing to create development accounts with NODE_ENV=production.');
     }
-    await migrate({pool});
+    await with_direct_pool(function (direct) {
+        return migrate({pool: direct});
+    });
     for (const user of DEVELOPMENT_USERS) {
         const {rowCount} = await pool.query(
             `INSERT INTO users (handle, name, password_hash) VALUES ($1, $2, $3)
