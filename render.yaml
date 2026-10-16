@@ -4,6 +4,8 @@ services:
     name: sequence-board-game
     runtime: docker
     plan: free
+    # Next to the Neon database (aws-us-east-2); a service can't change region once created.
+    region: ohio
     branch: version-2
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
