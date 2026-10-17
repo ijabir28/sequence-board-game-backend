@@ -120,6 +120,16 @@ async function require_verified_email(session) {
     });
 }
 
+// One device at a time: a new session (signing in, or confirming an email, which signs in) ends the account's
+// sessions everywhere else. Sessions aren't cached in cookies, so the other devices are signed out on their next
+// request; the broadcast tells their open pages now, so they can say why (each page checks its own session).
+async function end_other_sessions(session) {
+    const {rowCount} = await pool.query('DELETE FROM auth_sessions WHERE user_id = $1 AND id <> $2', [session.userId, session.id]);
+    if (rowCount === 0) return;
+    const {rows: [user]} = await pool.query('SELECT handle FROM users WHERE id = $1', [session.userId]);
+    if (user) require('./socket').broadcast({event: 'signed_in_elsewhere', data: {handle: user.handle}});
+}
+
 // After a successful password change, tell the account's address, in case it wasn't its owner.
 const notify_password_change = createAuthMiddleware(async function (ctx) {
     if (ctx.path !== '/change-password' || isAPIError(ctx.context.returned) || !ctx.context.session) return;
@@ -223,7 +233,7 @@ const auth = betterAuth({
         autoSignInAfterVerification: true,
     },
     databaseHooks: {
-        session: {create: {before: require_verified_email}},
+        session: {create: {before: require_verified_email, after: end_other_sessions}},
     },
     plugins: [
         // Players sign in with their handle. The display name is the user's `name`, so no displayUsername.
