@@ -28,6 +28,17 @@ class UserError extends Error {
     }
 }
 
+// A card deck's id, as the frontend names its decks (`classic`, `four-colour`). Migration 0014 checks the same shape.
+const CARD_DECK_PATTERN = /^[a-z0-9-]{1,32}$/;
+
+/** {card_deck}, or {error} when it isn't a deck id. */
+function validate_card_deck(card_deck) {
+    if (typeof card_deck !== 'string' || !CARD_DECK_PATTERN.test(card_deck)) {
+        return {error: 'Choose one of the card decks.'};
+    }
+    return {card_deck};
+}
+
 function normalize_handle(handle) {
     return typeof handle === 'string' ? handle.trim().toLowerCase() : '';
 }
@@ -70,5 +81,5 @@ async function verify_password(password, stored_hash) {
 
 module.exports = {
     UserError, HANDLE_PATTERN, NAME_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
-    PLACEHOLDER_EMAIL_DOMAIN, normalize_handle, validate_name, real_email, hash_password, verify_password,
+    PLACEHOLDER_EMAIL_DOMAIN, normalize_handle, validate_name, validate_card_deck, real_email, hash_password, verify_password,
 };

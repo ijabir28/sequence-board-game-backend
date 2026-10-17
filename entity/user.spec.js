@@ -1,4 +1,4 @@
-const {normalize_handle, validate_name, hash_password, verify_password} = require('./user');
+const {normalize_handle, validate_name, validate_card_deck, hash_password, verify_password} = require('./user');
 
 describe('normalize_handle', function () {
     test('trims and lower-cases, so handles are case-insensitive', function () {
@@ -16,6 +16,18 @@ describe('validate_name', function () {
     test('explains what is wrong with an empty, long or missing name', function () {
         for (const name of ['   ', 'x'.repeat(11), 42, undefined]) {
             expect(validate_name(name).error).toMatch(/up to 10 characters/);
+        }
+    });
+});
+
+describe('validate_card_deck', function () {
+    test('accepts a deck id', function () {
+        expect(validate_card_deck('four-colour')).toEqual({card_deck: 'four-colour'});
+    });
+
+    test('refuses anything else', function () {
+        for (const card_deck of ['', 'Classic', '../x', 'x'.repeat(33), 7, null, undefined]) {
+            expect(validate_card_deck(card_deck).error).toBeDefined();
         }
     });
 });
