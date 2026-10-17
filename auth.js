@@ -28,7 +28,7 @@ function session_secret() {
     if (process.env.NODE_ENV === 'production') {
         throw new Error('SESSION_SECRET must be set in production.');
     }
-    return 'development-only-session-secret';
+    return 'development-only-session-secret-never-use-in-production';
 }
 
 // Where players open the app. Links in emails point here, and requests from other origins are refused. In
