@@ -3,7 +3,7 @@ const db_game = require('../database/games');
 const {transaction} = require('../database/pool');
 const socket_server = require('../socket');
 const {broadcast_room} = require('./room');
-const {RuleError, create_game, apply_move, view_for, random_move} = require('../entity/sequence_game');
+const {RuleError, create_game, next_first_seat, apply_move, view_for, random_move} = require('../entity/sequence_game');
 const {suggest_move} = require('../entity/hints');
 const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
@@ -250,7 +250,9 @@ const next_round = host_decision(async function (room, current, client) {
         await db_game.save_stats({room_id: room.id, round: current.round, stats: round_stats(current), client});
     }
     const now = new Date();
-    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings}), {round: current.round + 1});
+    // The first turn moves on to the next seat, so it goes to the other team (see next_first_seat()).
+    const first = next_first_seat(current);
+    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: current.round + 1});
     const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
     await db_game.create({room_id: room.id, state: created, turn_deadline: turn_deadline(room, created), client});
     return {room, game: created};

@@ -635,6 +635,36 @@ describe_with_database('rooms and table games', function () {
             expect((await request(app).get(`/room/${id}`)).body).toMatchObject({round: 2, rounds_over: true});
         });
 
+        test('each round starts with the next seat, so the first turn alternates between the teams', async function () {
+            const id = (await agents.alice.post('/room/create')
+                .send({number_of_team: 2, number_of_player_in_each_team: 2, name: 'Rotation'}).expect(200)).body.id;
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_2');
+            await join('carol', id, 'TEAM_1');
+            await join('dave', id, 'TEAM_2');
+            await agents.alice.post(`/room/${id}/start`).expect(200);
+
+            const starts = [];
+            for (let round = 1; round <= 5; round++) {
+                const state = await require('../database/games').get({room_id: id});
+                expect([state.round, state.turn, state.current]).toEqual([round, 1, state.first]);
+                starts.push(state.current);
+                const won = await win_round(id);
+                expect(won.response.rounds.results.at(-1).stats.first_player).toBe(state.players[state.first].handle);
+                if (round < 5) await agents.alice.post(`/room/${id}/rounds/next`).expect(200);
+            }
+            // Seats alternate teams (alice, bob, carol, dave), so each round's first player is on the other team.
+            expect(starts).toEqual([0, 1, 2, 3, 4].map(function (k) {
+                return (starts[0] + k) % 4;
+            }));
+            const teams = starts.map(function (seat) {
+                return seat % 2;
+            });
+            teams.slice(1).forEach(function (team, i) {
+                expect(team).not.toBe(teams[i]);
+            });
+        });
+
         test('a round won before statistics were kept is summed up from its state', async function () {
             const id = await started_table('Legacy');
             const won = await win_round(id);
