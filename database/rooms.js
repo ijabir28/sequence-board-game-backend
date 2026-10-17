@@ -78,15 +78,15 @@ async function update({id, name, settings, client = pool}) {
     );
 }
 
-// {id, name, administrator, administrator_name, team_count, players_per_team, created_at, settings: {mode, history, highlights, auto_draw_dead, turn_seconds,
-//  dead_cards, exchanges_per_turn},
+// {id, name, administrator, administrator_name, team_count, players_per_team, created_at, rounds_ended_at,
+//  settings: {mode, history, highlights, auto_draw_dead, turn_seconds, dead_cards, exchanges_per_turn},
 //  teams: [{handle, players: [{handle, name} | null]}]} or undefined. `lock` holds the room row until the
 // transaction ends, which serialises joins, starts and settings changes.
 async function get({id, client = pool, lock = false}) {
     const {rows} = await client.query(
         `SELECT rooms.id, rooms.name, users.handle AS administrator, users.name AS administrator_name,
                 rooms.team_count, rooms.players_per_team,
-                rooms.created_at, ${SETTINGS_SELECT}
+                rooms.created_at, rooms.rounds_ended_at, ${SETTINGS_SELECT}
          FROM rooms JOIN users ON users.id = rooms.administrator_id
          WHERE rooms.id = $1 ${lock ? 'FOR UPDATE OF rooms' : ''}`,
         [String(id)]
@@ -154,6 +154,11 @@ async function join({id, team_handle: handle, user, client}) {
     );
 }
 
+// The host ended the table's rounds. Call inside the transaction that locked the room.
+async function end_rounds({id, client}) {
+    await client.query('UPDATE rooms SET rounds_ended_at = now() WHERE id = $1', [String(id)]);
+}
+
 const USER_ROOMS_WHERE = `rooms.administrator_id = $1
          OR EXISTS (SELECT 1 FROM room_seats WHERE room_seats.room_id = rooms.id AND room_seats.user_id = $1)`;
 
@@ -164,7 +169,7 @@ async function count_for_user({user_id, client = pool}) {
 }
 
 // A user's rooms with how far each got: the columns of GET /user/rooms. $1 is the user's id. `your_team` is
-// null when the user only created the room.
+// null when the user only created the room. The game columns are the current (latest) round's.
 const USER_ROOMS_SELECT = `
         SELECT rooms.id, rooms.name, rooms.created_at, administrators.handle AS administrator,
                administrators.name AS administrator_name, ${SETTINGS_SELECT},
@@ -175,11 +180,13 @@ const USER_ROOMS_SELECT = `
                     WHEN games.finished_at IS NULL THEN 'playing'
                     ELSE 'finished' END AS status,
                games.started_at, games.updated_at AS last_move_at, games.finished_at, games.winner_team,
-               (SELECT count(*)::INT FROM turns WHERE turns.game_id = games.id) AS move_count
+               (SELECT count(*)::INT FROM turns WHERE turns.game_id = games.id) AS move_count,
+               games.round, rooms.rounds_ended_at IS NOT NULL AS rounds_over
         FROM rooms
         JOIN users AS administrators ON administrators.id = rooms.administrator_id
         LEFT JOIN room_seats AS my_seat ON my_seat.room_id = rooms.id AND my_seat.user_id = $1
-        LEFT JOIN games ON games.room_id = rooms.id`;
+        LEFT JOIN games ON games.room_id = rooms.id
+                       AND games.round = (SELECT max(round) FROM games AS latest WHERE latest.room_id = rooms.id)`;
 
 // Frees the user's seat. Call inside the transaction that locked the room and checked the game hasn't
 // started. Throws NOT_SEATED when the user has no seat here.
@@ -224,4 +231,4 @@ async function current_for_user({user_id, client = pool}) {
     return rows[0] === undefined ? undefined : read_settings(rows[0]);
 }
 
-module.exports = {create, update, get, is_seated, is_full, join, leave, reseat, list_for_user, count_for_user, current_for_user};
+module.exports = {create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user};

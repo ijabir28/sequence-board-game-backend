@@ -14,5 +14,7 @@ room_router.get('/:id/turns', room_game.turns);
 room_router.post('/:id/game/play', room_game.play);
 room_router.post('/:id/game/exchange', room_game.exchange);
 room_router.post('/:id/game/pass', room_game.pass);
+room_router.post('/:id/rounds/next', room_game.next_round);
+room_router.post('/:id/rounds/end', room_game.end_rounds);
 
 module.exports = {room_router};

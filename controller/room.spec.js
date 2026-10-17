@@ -517,6 +517,139 @@ describe_with_database('rooms and table games', function () {
         });
     });
 
+    describe('rounds', function () {
+        // Sets the current round up so the player whose turn it is wins with their next move: their team already has
+        // a sequence (row 8) and four chips in row 1, and their first card is 4-Spade, which goes on (1, 5) and
+        // completes the second sequence. Returns {handle, team, body}: who plays the winning move, and the move.
+        async function winning_move(id) {
+            const games = require('../database/games');
+            const state = await games.get({room_id: id});
+            const player = state.players[state.current];
+            const chips = state.chips.map(function (row) {
+                return row.slice();
+            });
+            [1, 2, 3, 4].forEach(function (column) {
+                chips[1][column] = player.team;
+            });
+            const sequence = {team: player.team, cells: [1, 2, 3, 4, 5].map(function (column) {
+                chips[8][column] = player.team;
+                return {row: 8, column};
+            })};
+            const hands = state.hands.slice();
+            hands[state.current] = ['4-Spade'].concat(hands[state.current].slice(1));
+            await games.save_state({room_id: id, state: Object.assign({}, state, {chips, hands, sequences: [sequence]})});
+            return {handle: player.handle, team: player.team, body: {hand_index: 0, row: 1, column: 5}};
+        }
+
+        async function win_round(id) {
+            const move = await winning_move(id);
+            const response = await agents[move.handle].post(`/room/${id}/game/play`).send(move.body).expect(200);
+            return Object.assign({response: response.body}, move);
+        }
+
+        async function started_table(name) {
+            const id = (await agents.alice.post('/room/create')
+                .send({number_of_team: 2, number_of_player_in_each_team: 1, name}).expect(200)).body.id;
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_2');
+            await agents.alice.post(`/room/${id}/start`).expect(200);
+            return id;
+        }
+
+        test('the host deals another round with the same teams once one is won, and each round is summed up', async function () {
+            const id = await started_table('Two rounds');
+            const fresh = (await agents.bob.get(`/room/${id}/game`)).body;
+            expect(fresh).toMatchObject({host: 'alice', rounds: {round: 1, over: false, results: [], summary: null}});
+            const early = await agents.alice.post(`/room/${id}/rounds/next`);
+            expect([early.status, early.body.error]).toEqual([409, 'ROUND_IN_PROGRESS']);
+
+            const won = await win_round(id);
+            expect(won.response.winner).toBe(won.team);
+            expect(won.response.rounds.results).toEqual([{
+                round: 1, winner: won.team, started_at: expect.any(String), finished_at: expect.any(String),
+                stats: expect.objectContaining({winner: won.team, turns: 1, players: expect.any(Array), teams: expect.any(Array)}),
+            }]);
+            const winner_stats = won.response.rounds.results[0].stats;
+            expect(winner_stats.teams[won.team]).toMatchObject({sequences: 1, placed: 1});
+            expect(winner_stats.players.find(function (p) {
+                return p.handle === won.handle;
+            })).toMatchObject({plays: 1});
+            const {rows: saved} = await database.pool.query('SELECT stats FROM games WHERE room_id = $1 AND round = 1', [id]);
+            expect(saved[0].stats).toEqual(winner_stats);
+
+            const guest = await agents.bob.post(`/room/${id}/rounds/next`);
+            expect([guest.status, guest.body.error]).toEqual([403, 'NOT_HOST']);
+            const next = await agents.alice.post(`/room/${id}/rounds/next`);
+            expect(next.status).toBe(200);
+            expect(next.body).toMatchObject({winner: null, turn: 1, rounds: {round: 2, over: false, summary: null}});
+            expect(next.body.rounds.results).toHaveLength(1);
+            expect(next.body.players.map(function (p) {
+                return [p.handle, p.team];
+            })).toEqual(won.response.players.map(function (p) {
+                return [p.handle, p.team];
+            }));
+            expect(next.body.board.flat().every(function (cell) {
+                return cell.team === null;
+            })).toBe(true);
+            expect((await request(app).get(`/room/${id}`)).body).toMatchObject({game_started: true, round: 2, rounds_over: false});
+
+            // Moves go to the new round; the won one keeps its own.
+            const move = await legal_play(id);
+            await agents[move.handle].post(`/room/${id}/game/play`).send(move.body).expect(200);
+            const {rows} = await database.pool.query(
+                `SELECT games.round, count(turns.*)::INT AS moves FROM games LEFT JOIN turns ON turns.game_id = games.id
+                 WHERE games.room_id = $1 GROUP BY games.round ORDER BY games.round`, [id]);
+            expect(rows).toEqual([{round: 1, moves: 1}, {round: 2, moves: 1}]);
+            const listed = (await agents.bob.get('/user/rooms')).body.rooms.find(function (r) {
+                return r.id === id;
+            });
+            expect(listed).toMatchObject({status: 'playing', round: 2, rounds_over: false, move_count: 1});
+        });
+
+        test('ending the rounds gives the final summary with the verdict, and no round can follow', async function () {
+            const id = await started_table('Series');
+            const first = await win_round(id);
+            await agents.alice.post(`/room/${id}/rounds/next`).expect(200);
+            const second = await win_round(id);
+
+            const guest = await agents.bob.post(`/room/${id}/rounds/end`);
+            expect([guest.status, guest.body.error]).toEqual([403, 'NOT_HOST']);
+            const ended = await agents.alice.post(`/room/${id}/rounds/end`);
+            expect(ended.status).toBe(200);
+            const {summary} = ended.body.rounds;
+            expect(ended.body.rounds).toMatchObject({round: 2, over: true});
+            expect(summary).toMatchObject({rounds_played: 2, turns: 2});
+            const wins = [0, 0];
+            wins[first.team]++;
+            wins[second.team]++;
+            expect(summary.teams.map(function (t) {
+                return t.rounds_won;
+            })).toEqual(wins);
+            expect(summary.verdict).toEqual(first.team === second.team
+                ? {winner: first.team, leaders: [first.team]}
+                : {winner: null, leaders: [0, 1]});
+
+            expect((await agents.bob.get(`/room/${id}/game`)).body.rounds.summary).toEqual(summary);
+            expect((await agents.alice.post(`/room/${id}/rounds/next`)).body.error).toBe('ROUNDS_OVER');
+            expect((await agents.alice.post(`/room/${id}/rounds/end`)).body.error).toBe('ROUNDS_OVER');
+            expect((await request(app).get(`/room/${id}`)).body).toMatchObject({round: 2, rounds_over: true});
+        });
+
+        test('a round won before statistics were kept is summed up from its state', async function () {
+            const id = await started_table('Legacy');
+            const won = await win_round(id);
+            await database.pool.query('UPDATE games SET stats = NULL WHERE room_id = $1', [id]);
+            const view = (await agents.alice.get(`/room/${id}/game`)).body;
+            expect(view.rounds.results[0].stats).toEqual(won.response.rounds.results[0].stats);
+
+            await agents.alice.post(`/room/${id}/rounds/next`).expect(200);
+            const {rows} = await database.pool.query('SELECT stats FROM games WHERE room_id = $1 AND round = 1', [id]);
+            expect(rows[0].stats).toEqual(won.response.rounds.results[0].stats);
+            // The new round's view lists it too (and gives the broadcast after the deal time to finish).
+            expect((await agents.bob.get(`/room/${id}/game`)).body.rounds.results[0].stats).toEqual(rows[0].stats);
+        });
+    });
+
     describe('players away from the table', function () {
         async function started_game(present) {
             const id = await open_room('alice', 2, 1, {turn_seconds: 60});
