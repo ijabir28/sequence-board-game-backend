@@ -22,8 +22,8 @@ services:
       # The address players open; emailed links point here and other origins are refused.
       - key: BETTER_AUTH_URL
         value: https://sequence-board-game-svxj.onrender.com
-      # Account emails (see docs/deploy.md#email). Set in the dashboard: the URL holds the SMTP password.
-      - key: SMTP_URL
+      # Account emails (see docs/deploy.md#email), set in the dashboard. Brevo's API, since the free tier blocks SMTP.
+      - key: BREVO_API_KEY
         sync: false
       - key: MAIL_FROM
         sync: false
