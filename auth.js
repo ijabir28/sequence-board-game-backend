@@ -57,7 +57,7 @@ function trusted_origins() {
     const origins = [new URL(base_url()).origin];
     if (process.env.NODE_ENV !== 'production') {
         // The backend itself, for the legacy page and for trying the API directly.
-        origins.push('http://localhost:3000');
+        origins.push('http://localhost:3000', 'http://192.168.0.220:5173');
     }
     return origins;
 }
