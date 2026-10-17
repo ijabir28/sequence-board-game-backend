@@ -332,6 +332,23 @@ Once the current round is won, ends the rounds: the GameView's `rounds.summary` 
 further round can be dealt. Returns the GameView and broadcasts `game_updated` and `room_updated`. Same errors as
 `rounds/next`.
 
+### `GET /room/:id/rounds/:round`
+How a won round went, to look back on it (the final results link to every round). Public, like the GameView. The
+log is the round's whole move log, whatever the room's history setting, since the round is over; hands and the deck
+are never included. `404 ROUND_NOT_FOUND`, `409 ROUND_IN_PROGRESS` while that round is played.
+
+```jsonc
+{
+  "round": 1, "winner": 0, "started_at": "…", "finished_at": "…",
+  "stats": {…},                       // as in rounds.results
+  "team_count": 2,
+  "players": [{"handle": "jabir", "name": "Jabir ibne kamal", "team": 0}, …],
+  "board": [[{"name": "Blank", "team": null}, …], …],   // the board as the round ended
+  "sequences": [{"team": 0, "cells": […]}, …],
+  "log": [{"kind": "place", …}, …]   // every move, oldest first
+}
+```
+
 ### `GET /room/:id/turns`
 The current round's moves so far, oldest first. Public, like the game view, and never includes hands or the deck.
 `404 ROOM_NOT_FOUND | GAME_NOT_FOUND`, `403 HISTORY_DISABLED` when the room plays without history; `[]` when the
