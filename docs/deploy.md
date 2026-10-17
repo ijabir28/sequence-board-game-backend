@@ -25,7 +25,7 @@ backend serves the build from `FRONTEND_DIST`: its files, and `index.html` for e
    `DATABASE_URL`, as with local Postgres.
 2. **Service.** In [Render](https://dashboard.render.com), sign in with GitHub, then *New → Blueprint* and pick
    `ijabir28/sequence-board-game-backend`. Render reads [render.yaml](../render.yaml): a free Docker web service in Ohio
-   (next to the database), on branch `version-2`, health check `/health`, a generated `SESSION_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`.
+   (next to the database), on branch `version-2`, health check `/health`, a generated `SESSION_SECRET`, `BETTER_AUTH_URL` (the service's address), `TRUST_PROXY=1`.
 3. Paste `DATABASE_URL` and `DATABASE_URL_UNPOOLED` from `.env.local` when it asks, and apply.
 4. The first start applies the migrations. Open `https://<service>.onrender.com`, create an account and play a game
    from two browsers.
@@ -47,8 +47,8 @@ when `NODE_ENV=production`, which the image sets).
 |---|---|---|
 | `DATABASE_URL` | you (Neon) | PostgreSQL for the app, pooled connection |
 | `DATABASE_URL_UNPOOLED` | you (Neon) | Direct connection, for migrations |
-| `SESSION_SECRET` | Render (generated) | Signs session cookies and socket presence tokens; changing it signs everyone out |
-| `COOKIE_SECURE` | render.yaml | Cookies only over HTTPS |
+| `SESSION_SECRET` | Render (generated) | Signs session cookies, emailed links and socket presence tokens; changing it signs everyone out |
+| `BETTER_AUTH_URL` | render.yaml | The address players open; emailed links point here and other origins are refused. Update it if the service's URL changes |
 | `TRUST_PROXY` | render.yaml | Hops of reverse proxy in front, so the sign-in rate limit sees the client's IP |
 | `NODE_ENV`, `FRONTEND_DIST` | Dockerfile | Production mode; where the built frontend is |
 | `PORT` | Render | Port to listen on |
@@ -71,7 +71,7 @@ Don't run `npm run db:seed` this way: it would create the development accounts i
 docker build -t sequence .
 docker compose up -d db
 docker run --rm -p 3001:3000 --network sequence_default \
-  -e DATABASE_URL=postgres://sequence:sequence@db:5432/sequence -e SESSION_SECRET=local sequence
+  -e DATABASE_URL=postgres://sequence:sequence@db:5432/sequence -e SESSION_SECRET=local -e BETTER_AUTH_URL=http://localhost:3000 sequence
 ```
 
 Then open http://localhost:3001.

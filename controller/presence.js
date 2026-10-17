@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const {session_secret} = require('../session');
+const {session_secret} = require('../auth');
 
 // Who is at each table's game right now: a player is present while at least one of their sockets has the game
 // open. Kept in memory, so after a restart everyone is away until their page reconnects (which it does by itself).

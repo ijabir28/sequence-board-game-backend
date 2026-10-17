@@ -139,7 +139,7 @@ function stamp_turn(previous, next, now = new Date()) {
 }
 
 function signed_in_handle(req) {
-    const handle = req.session.handle;
+    const handle = req.handle;
     if (handle === undefined) throw new GameError('NOT_SIGNED_IN', 'Sign in to play.');
     return handle;
 }
@@ -185,7 +185,7 @@ async function start(req, res) {
 /** GET /room/:id/game: the game as the signed-in player sees it (only their own hand). */
 async function get(req, res) {
     const {room, game} = await find_game(req.params.id);
-    res.send(view(room, game, req.session.handle));
+    res.send(view(room, game, req.handle));
 }
 
 /** GET /room/:id/turns: every move so far, oldest first. Public, like the game view, unless the room turned history off. */

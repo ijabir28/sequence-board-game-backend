@@ -1,7 +1,7 @@
 # API contract
 
 Base URL `http://localhost:3000`. Request bodies are JSON (`Content-Type: application/json`); urlencoded also
-works. Auth means "uses the session cookie set by `/user/signin`". There is no global error handler, so thrown
+works. Auth means "uses the session cookie set by `/api/auth/sign-in/username`". There is no global error handler, so thrown
 errors come back as Express's default **HTML** 500 page, not JSON. Behaviour below was confirmed against a
 running server.
 
@@ -11,30 +11,40 @@ running server.
 `200 {status: 'ok', database: 'up'}` when PostgreSQL answers, `503 {status: 'error', database: 'down'}` when it
 doesn't. Used by the backend's Docker healthcheck.
 
-## User
+## Accounts (Better Auth)
 
-Errors are JSON `{error: CODE, message}`; `message` is readable by players. Handles are case-insensitive:
-they are trimmed and lower-cased before use, and responses always carry the stored lower-case form.
+Signing up, in and out is [Better Auth](https://better-auth.com) 1.7, mounted at `/api/auth` (`auth.js`). Its
+errors are JSON `{code, message}`; its messages are terse, so the frontend words them itself. Handles are
+case-insensitive: Better Auth's `username` is the handle, trimmed and lower-cased before use. Every `POST` must come
+from a trusted origin (`BETTER_AUTH_URL`, plus `http://localhost:3000` in development) or it is `403 INVALID_ORIGIN`;
+browsers send `Origin` themselves. The session cookie is `sequence.session_token` (HttpOnly, `SameSite=Lax`,
+`Secure` over HTTPS). Only the endpoints the frontend uses are listed; the rest are Better Auth's defaults.
 
-### `POST /user/signup`
-Body `{handle, name, password}`. Creates the account and signs it in (sets cookie `connect.sid`).
-- Success: `201 {handle, name}`.
-- `400 INVALID_HANDLE` (3–20 of `a-z 0-9 _`), `400 INVALID_NAME` (1–10 characters after trimming; accounts made before this limit keep longer names),
-  `400 WEAK_PASSWORD` (8–200 characters).
-- `409 HANDLE_TAKEN`.
+### `POST /api/auth/sign-up/email`
+Body `{username, name, email, password}`. Creates the account and signs it in.
+- Success: `200 {token, user}`.
+- `400 USERNAME_TOO_SHORT`, `USERNAME_TOO_LONG`, `INVALID_USERNAME` (3–20 of `a-z 0-9 _`), `400 USERNAME_IS_ALREADY_TAKEN`.
+- `400 INVALID_NAME` (1–10 characters after trimming; accounts made before this limit keep longer names).
+- `400 VALIDATION_ERROR` for a malformed email, `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`.
+- `400 PASSWORD_TOO_SHORT` / `PASSWORD_TOO_LONG` (8–200 characters).
 - `429 TOO_MANY_ATTEMPTS` after 20 sign-ups from one IP within an hour.
 
-### `POST /user/signin`
-Body `{handle, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
-- Success: `200 {handle, name}`, sets cookie `connect.sid` (a new session id on every sign-in).
-- `401 INVALID_CREDENTIALS` for a wrong password or an unknown handle (the two are indistinguishable).
+### `POST /api/auth/sign-in/username`
+Body `{username, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
+- Success: `200 {token, user}`, sets the session cookie (a new session on every sign-in).
+- `401 INVALID_USERNAME_OR_PASSWORD` for a wrong password or an unknown handle (the two are indistinguishable).
 - `429 TOO_MANY_ATTEMPTS` after 10 failed sign-ins from one IP within 15 minutes. Successful sign-ins don't count.
 
-### `POST /user/signout`
-Ends the session on the server and clears the cookie. Always `204`, with or without a session.
+### `POST /api/auth/sign-out`
+Deletes the session row and clears the cookie. `200 {success: true}`.
+
+## User
+
+Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name}`, or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?".
+`200 {handle, name, email, email_verified, image}`, or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed
+in?". `email` is `null` for accounts made before emails were asked for; `image` is the avatar's URL or `null`.
 
 ### `GET /user/rooms` (auth)
 One page of the tables you created or sat at, newest first. Query `page` (from 1, default 1) and `per_page`
