@@ -1,7 +1,7 @@
 // HTTP tests for rooms and table games. Need PostgreSQL, see database/test_database.js.
 const request = require('supertest');
 const {has_database, use_test_schema} = require('../database/test_database');
-const {verified_account} = require('./test_accounts');
+const {ORIGIN, verified_account} = require('./test_accounts');
 
 const describe_with_database = has_database ? describe : describe.skip;
 
@@ -346,6 +346,8 @@ describe_with_database('rooms and table games', function () {
             expect(after.turn_started_at).toEqual(expect.any(String));
             const {rows: [stored]} = await database.pool.query('SELECT state FROM games WHERE room_id = $1', [id]);
             expect(stored.state.rules).toEqual({auto_draw_dead: true, exchanges_per_turn: 2});
+            // Signing in above ended bob's other session (one device at a time): sign his agent back in.
+            await agents.bob.post('/api/auth/sign-in/username').set('Origin', ORIGIN).send({username: 'bob', password: 'long enough'}).expect(200);
         });
     });
 
