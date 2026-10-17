@@ -94,6 +94,16 @@ async function get_deadline({room_id, client = pool}) {
     return rows[0] === undefined ? null : rows[0].turn_deadline;
 }
 
+// One round of the table: {round, state, winner, started_at, finished_at, stats}, or undefined.
+async function get_round({room_id, round, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT round, state, winner_team AS winner, started_at, finished_at, stats
+         FROM games WHERE room_id = $1 AND round = $2`,
+        [String(room_id), round]
+    );
+    return rows[0];
+}
+
 // The current round's moves in play order, with who made them. Only public information: no hands, no deck.
 async function list_turns({room_id, client = pool}) {
     const {rows} = await client.query(
@@ -123,4 +133,4 @@ async function list_turns({room_id, client = pool}) {
     });
 }
 
-module.exports = {get, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, get_deadline};
+module.exports = {get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, get_deadline};

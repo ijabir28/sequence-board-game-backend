@@ -21,6 +21,7 @@ const STATUS_BY_ERROR = {
     NOT_YOUR_TURN: 409,
     GAME_OVER: 409,
     ROUND_IN_PROGRESS: 409,
+    ROUND_NOT_FOUND: 404,
     ROUNDS_OVER: 409,
     HISTORY_DISABLED: 403,
 };
@@ -216,6 +217,34 @@ async function start(req, res) {
 async function get(req, res) {
     const {room, game} = await find_game(req.params.id);
     res.send(view(room, game, req.handle, await rounds_of(room, game)));
+}
+
+/**
+ * GET /room/:id/rounds/:round: how a won round went, to look back on it: its statistics, the board as the round
+ * ended and its whole move log (whatever the room's history setting: the round is over). Public, like the game view.
+ */
+async function round_detail(req, res) {
+    const {room} = await find_game(req.params.id);
+    const number = Number(req.params.round);
+    const round = Number.isInteger(number) && number > 0 ? await db_game.get_round({room_id: room.id, round: number}) : undefined;
+    if (round === undefined) throw new GameError('ROUND_NOT_FOUND', `This table has no round ${req.params.round}.`);
+    if (round.finished_at === null) throw new GameError('ROUND_IN_PROGRESS', 'This round is still being played.');
+    const {team_count, players, board, sequences, log} = view_for(round.state, null);
+    res.send({
+        round: round.round,
+        winner: round.winner,
+        started_at: round.started_at,
+        finished_at: round.finished_at,
+        // Rounds won before statistics were kept are summed up from their state.
+        stats: round.stats || round_stats(round.state),
+        team_count,
+        players: players.map(function ({handle, name, team}) {
+            return {handle, name, team};
+        }),
+        board,
+        sequences,
+        log,
+    });
 }
 
 // The host's decision once a round is won: `decide(room, game, client)` runs with the room and the round locked,
@@ -424,6 +453,7 @@ module.exports = {
     pass,
     next_round,
     end_rounds,
+    round_detail: handler(round_detail),
     expire_turn,
     expire_overdue_turns,
     start_turn_timer,

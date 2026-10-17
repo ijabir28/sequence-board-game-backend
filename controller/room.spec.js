@@ -685,6 +685,47 @@ describe_with_database('rooms and table games', function () {
             });
         });
 
+        test('GET /room/:id/rounds/:round shows a won round: its statistics, final board and whole move log', async function () {
+            // History off: the game view keeps only the latest move, but a won round can be read back in full.
+            const id = await started_table('Look back');
+            // An opening move away from rows 1 and 8, which winning_move() fills for the next player.
+            const {legal_targets} = require('../entity/sequence_game');
+            const state = await require('../database/games').get({room_id: id});
+            const opener = state.players[state.current].handle;
+            const opening = state.hands[state.current].map(function (_, hand_index) {
+                const target = legal_targets(state, hand_index).find(function (t) {
+                    return t.row !== 1 && t.row !== 8;
+                });
+                return target && {hand_index, row: target.row, column: target.column};
+            }).find(Boolean);
+            await agents[opener].post(`/room/${id}/game/play`).send(opening).expect(200);
+            const early = await request(app).get(`/room/${id}/rounds/1`);
+            expect([early.status, early.body.error]).toEqual([409, 'ROUND_IN_PROGRESS']);
+
+            const won = await win_round(id);
+            await agents.alice.post(`/room/${id}/rounds/next`).expect(200);
+            const detail = (await request(app).get(`/room/${id}/rounds/1`).expect(200)).body;
+            expect(detail).toMatchObject({
+                round: 1, winner: won.team, team_count: 2, started_at: expect.any(String), finished_at: expect.any(String),
+                stats: won.response.rounds.results[0].stats,
+            });
+            expect(detail.players.map(function (p) {
+                return p.handle;
+            }).sort()).toEqual(['alice', 'bob']);
+            expect(detail.board[1][5]).toEqual({name: '4-Spade', team: won.team});
+            expect(detail.sequences).toHaveLength(2);
+            expect(detail.log.map(function (entry) {
+                return entry.kind;
+            })).toEqual(['place', 'place', 'sequence', 'win']);
+            expect(detail).not.toHaveProperty('hand');
+            expect(JSON.stringify(detail)).not.toContain('deck');
+
+            for (const [round, status, error] of [[2, 409, 'ROUND_IN_PROGRESS'], [3, 404, 'ROUND_NOT_FOUND'], ['x', 404, 'ROUND_NOT_FOUND']]) {
+                const response = await request(app).get(`/room/${id}/rounds/${round}`);
+                expect([response.status, response.body.error]).toEqual([status, error]);
+            }
+        });
+
         test('a round won before statistics were kept is summed up from its state', async function () {
             const id = await started_table('Legacy');
             const won = await win_round(id);
