@@ -214,7 +214,9 @@ A full game for a room, run by the server (`entity/sequence_game.js`). Errors ar
 ### `POST /room/:id/start` (auth)
 Deals a game once every seat is taken. Only the table's creator (the host, `administrator`) may start it; anyone
 else gets `403 NOT_HOST`. Seats alternate
-teams (T1, T2, [T3,] T1, …), and the first seat moves first. Returns a GameView and broadcasts `room_updated` and
+teams (T1, T2, [T3,] T1, …), and the first seat moves first in round 1. Each later round starts with the seat after
+the one that started the round before, so the first turn passes to the next team every round, and within each team to
+its next player (2 teams of 2: T1's first player, T2's first, T1's second, T2's second, then round again). Returns a GameView and broadcasts `room_updated` and
 `game_updated`.
 
 The game is played in **rounds**. `start` deals round 1; once a round is won, the host either deals another round
@@ -319,7 +321,8 @@ Each applies the move for the current player, draws a replacement card, and retu
 broadcasts `game_updated`.
 
 ### `POST /room/:id/rounds/next` (auth, host)
-Once the current round is won, deals the next one: the same teams and seats, an empty board, a fresh deck. Returns
+Once the current round is won, deals the next one: the same teams and seats, an empty board, a fresh deck, and the
+first turn to the seat after the one that started the round before (another team's player). Returns
 the new round's GameView and broadcasts `game_updated` and `room_updated`. `403 NOT_HOST`, `404 GAME_NOT_FOUND`
 (nothing dealt yet), `409 ROUND_IN_PROGRESS` (the round isn't won yet), `409 ROUNDS_OVER`.
 

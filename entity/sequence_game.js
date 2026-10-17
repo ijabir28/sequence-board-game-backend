@@ -96,8 +96,10 @@ function empty_chip_grid() {
  * @param {{auto_draw_dead?: boolean, dead_cards?: string, exchanges_per_turn?: number|null}} rules  Optional rules,
  *        kept in the state for the whole game. Dead cards are only auto-drawn when they are marked (`dead_cards` is
  *        not 'manual'). `exchanges_per_turn` is how many dead cards a player may exchange per turn (null: unlimited).
+ * @param {number} first  The seat that moves first (0 by default). Kept in the state as `first`, which says whose
+ *        each turn was (turns go round the seats from there).
  */
-function create_game({teams, rules = {}, random = Math.random}) {
+function create_game({teams, rules = {}, random = Math.random, first = 0}) {
     const team_count = teams.length;
     const players_per_team = teams.length > 0 ? teams[0].players.length : 0;
     const evenly_divided = teams.every(function (team) {
@@ -112,6 +114,10 @@ function create_game({teams, rules = {}, random = Math.random}) {
         const team = seat % team_count;
         const player = teams[team].players[Math.floor(seat / team_count)];
         players.push({handle: player.handle, name: player.name, team});
+    }
+
+    if (!Number.isInteger(first) || first < 0 || first >= players.length) {
+        throw new RuleError('INVALID_FIRST_SEAT', `There is no seat ${first} at a table of ${players.length}.`);
     }
 
     const hand_size = HAND_SIZE_BY_PLAYER_COUNT[players.length];
@@ -133,13 +139,23 @@ function create_game({teams, rules = {}, random = Math.random}) {
         chips: empty_chip_grid(),
         deck,
         discard: [],
-        current: 0,
+        first,
+        current: first,
         turn: 1,
         exchanges_this_turn: 0,
         sequences: [],
         winner: null,
         log: [],
     }, random);
+}
+
+/**
+ * The seat that moves first in the round after `state`'s: the next seat round the table. Seats alternate teams, so
+ * the first turn passes to the next team every round, and within a team to its next player.
+ */
+function next_first_seat(state) {
+    const first = Number.isInteger(state.first) ? state.first : 0;
+    return (first + 1) % state.players.length;
 }
 
 function current_player(state) {
@@ -535,6 +551,7 @@ module.exports = {
     RuleError,
     random_move,
     create_game,
+    next_first_seat,
     apply_move,
     view_for,
     legal_targets,

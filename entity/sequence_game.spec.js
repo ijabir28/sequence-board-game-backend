@@ -1,4 +1,4 @@
-const {create_game, apply_move, view_for, legal_targets, find_new_sequences, empty_chip_grid, random_move} = require('./sequence_game');
+const {create_game, next_first_seat, apply_move, view_for, legal_targets, find_new_sequences, empty_chip_grid, random_move} = require('./sequence_game');
 const board_deck = require('../data/board_deck.json');
 
 function teams_of(team_count, players_per_team) {
@@ -31,6 +31,41 @@ describe('create_game', function () {
             return h.length === 6;
         })).toBe(true);
         expect(game.deck.length).toBe(104 - 24);
+    });
+
+    it('starts with the first seat unless told otherwise', function () {
+        const game = create_game({teams: teams_of(2, 2)});
+        expect([game.first, game.current]).toEqual([0, 0]);
+        const later = create_game({teams: teams_of(2, 2), first: 3});
+        expect([later.first, later.current, later.turn]).toEqual([3, 3, 1]);
+        expect(function () {
+            apply_move(later, 't1p0', {type: 'pass'});
+        }).toThrow(/Player 1-1's turn/);
+        for (const first of [-1, 4, 1.5, '1']) {
+            expect(function () {
+                create_game({teams: teams_of(2, 2), first});
+            }).toThrow(/no seat/);
+        }
+    });
+
+    it('passes the first turn to the next team every round, and round each team\'s players', function () {
+        let game = create_game({teams: teams_of(2, 2)});
+        const firsts = [];
+        for (let round = 0; round < 5; round++) {
+            firsts.push(game.players[game.current].handle);
+            game = create_game({teams: teams_of(2, 2), first: next_first_seat(game)});
+        }
+        expect(firsts).toEqual(['t0p0', 't1p0', 't0p1', 't1p1', 't0p0']);
+
+        let three = create_game({teams: teams_of(3, 1), first: 2});
+        const teams = [];
+        for (let round = 0; round < 4; round++) {
+            teams.push(three.players[three.current].team);
+            three = create_game({teams: teams_of(3, 1), first: next_first_seat(three)});
+        }
+        expect(teams).toEqual([2, 0, 1, 2]);
+        // Games stored before `first` was kept started at seat 0.
+        expect(next_first_seat(Object.assign({}, three, {first: undefined}))).toBe(1);
     });
 
     it('rejects tables the rules cannot deal for', function () {
