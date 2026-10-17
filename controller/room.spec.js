@@ -303,6 +303,26 @@ describe_with_database('rooms and table games', function () {
             expect(turns[0].events[0].card).toBe(turns[0].card);
         });
 
+        test('the first turn of round 1 goes to a seat drawn at random', async function () {
+            async function opener(random) {
+                const id = await open_room('carol', 2, 1);
+                await join('carol', id, 'TEAM_1');
+                await join('dave', id, 'TEAM_2');
+                const spy = jest.spyOn(Math, 'random').mockReturnValue(random);
+                try {
+                    const started = await agents.carol.post(`/room/${id}/start`).expect(200);
+                    const state = await require('../database/games').get({room_id: id});
+                    expect([state.first, state.current, state.turn]).toEqual([state.current, state.current, 1]);
+                    return started.body.current_player;
+                } finally {
+                    spy.mockRestore();
+                }
+            }
+            // Seats are carol (Team 1) then dave (Team 2): a low draw picks carol, a high one dave.
+            expect(await opener(0.1)).toBe('carol');
+            expect(await opener(0.9)).toBe('dave');
+        });
+
         test('lets only one of two simultaneous moves through', async function () {
             const id = await open_room('carol', 2, 1);
             await join('carol', id, 'TEAM_1');

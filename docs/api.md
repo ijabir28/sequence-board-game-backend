@@ -214,9 +214,10 @@ A full game for a room, run by the server (`entity/sequence_game.js`). Errors ar
 ### `POST /room/:id/start` (auth)
 Deals a game once every seat is taken. Only the table's creator (the host, `administrator`) may start it; anyone
 else gets `403 NOT_HOST`. Seats alternate
-teams (T1, T2, [T3,] T1, …), and the first seat moves first in round 1. Each later round starts with the seat after
-the one that started the round before, so the first turn passes to the next team every round, and within each team to
-its next player (2 teams of 2: T1's first player, T2's first, T1's second, T2's second, then round again). Returns a GameView and broadcasts `room_updated` and
+teams (T1, T2, [T3,] T1, …), and a seat drawn at random moves first in round 1. Each later round starts with the seat
+after the one that started the round before, so the first turn passes to the next team every round, and within each team to
+its next player (2 teams of 2 whose round 1 T1's first player opened: T2's first player opens round 2, T1's second round 3, T2's
+second round 4, then round again). The state keeps the opening seat as `first`. Returns a GameView and broadcasts `room_updated` and
 `game_updated`.
 
 The game is played in **rounds**. `start` deals round 1; once a round is won, the host either deals another round

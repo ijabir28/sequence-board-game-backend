@@ -3,7 +3,7 @@ const db_game = require('../database/games');
 const {transaction} = require('../database/pool');
 const socket_server = require('../socket');
 const {broadcast_room} = require('./room');
-const {RuleError, create_game, next_first_seat, apply_move, view_for, random_move} = require('../entity/sequence_game');
+const {RuleError, create_game, random_first_seat, next_first_seat, apply_move, view_for, random_move} = require('../entity/sequence_game');
 const {suggest_move} = require('../entity/hints');
 const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
@@ -200,7 +200,9 @@ async function start(req, res) {
 
         // Players are still on the table page, so the first turn usually starts paused until its player opens the game.
         const now = new Date();
-        const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings}), {round: 1});
+        // Who moves first in round 1 is drawn at random; each later round passes it to the next seat.
+        const first = random_first_seat(room.teams);
+        const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: 1});
         const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
         await db_game.create({room_id: id, state: created, turn_deadline: turn_deadline(room, created), client});
         return {room, game: created, rounds: await rounds_of(room, created, client)};
