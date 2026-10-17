@@ -1,42 +1,22 @@
-const {UserError, validate_signup, hash_password, verify_password} = require('./user');
+const {normalize_handle, validate_name, hash_password, verify_password} = require('./user');
 
-describe('validate_signup', function () {
-    const valid = {handle: 'jabir', name: 'Jabir', password: 'correct horse'};
+describe('normalize_handle', function () {
+    test('trims and lower-cases, so handles are case-insensitive', function () {
+        expect(normalize_handle('  Jabir_01 ')).toBe('jabir_01');
+        expect(normalize_handle(undefined)).toBe('');
+    });
+});
 
-    function code_of(fields) {
-        try {
-            validate_signup(Object.assign({}, valid, fields));
-        } catch (e) {
-            return e instanceof UserError ? e.code : e;
+describe('validate_name', function () {
+    test('trims a display name of at most 10 characters', function () {
+        expect(validate_name('  Jabir  ')).toEqual({name: 'Jabir'});
+        expect(validate_name(' ' + 'x'.repeat(10) + ' ')).toEqual({name: 'x'.repeat(10)});
+    });
+
+    test('explains what is wrong with an empty, long or missing name', function () {
+        for (const name of ['   ', 'x'.repeat(11), 42, undefined]) {
+            expect(validate_name(name).error).toMatch(/up to 10 characters/);
         }
-        return 'VALID';
-    }
-
-    test('normalises the handle and trims the name', function () {
-        expect(validate_signup(Object.assign({}, valid, {handle: '  Jabir_01 ', name: '  Jabir  '})))
-            .toEqual({handle: 'jabir_01', name: 'Jabir', password: 'correct horse'});
-    });
-
-    test('rejects handles that are too short, too long or have other characters', function () {
-        expect(code_of({handle: 'ab'})).toBe('INVALID_HANDLE');
-        expect(code_of({handle: 'a'.repeat(21)})).toBe('INVALID_HANDLE');
-        expect(code_of({handle: 'jabir!'})).toBe('INVALID_HANDLE');
-        expect(code_of({handle: undefined})).toBe('INVALID_HANDLE');
-        expect(code_of({handle: 'a'.repeat(20)})).toBe('VALID');
-    });
-
-    test('requires a display name of at most 10 characters', function () {
-        expect(code_of({name: '   '})).toBe('INVALID_NAME');
-        expect(code_of({name: 'x'.repeat(11)})).toBe('INVALID_NAME');
-        expect(validate_signup(Object.assign({}, valid, {name: ' ' + 'x'.repeat(10) + ' '})).name).toBe('x'.repeat(10));
-        expect(code_of({name: 42})).toBe('INVALID_NAME');
-    });
-
-    test('requires a password of 8 to 200 characters', function () {
-        expect(code_of({password: '1234567'})).toBe('WEAK_PASSWORD');
-        expect(code_of({password: 'x'.repeat(201)})).toBe('WEAK_PASSWORD');
-        expect(code_of({password: 12345678})).toBe('WEAK_PASSWORD');
-        expect(code_of({password: '12345678'})).toBe('VALID');
     });
 });
 

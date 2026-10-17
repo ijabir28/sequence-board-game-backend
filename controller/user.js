@@ -1,13 +1,12 @@
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
-const {UserError, normalize_handle, validate_signup, hash_password, verify_password} = require('../entity/user');
+const {UserError, real_email} = require('../entity/user');
 
-// Account endpoints. Errors are JSON: {error: CODE, message}, like the table game endpoints.
+// The signed-in player's endpoints. Signing up, in and out is Better Auth's (/api/auth, see auth.js).
+// Errors are JSON: {error: CODE, message}, like the table game endpoints.
 
 const STATUS_BY_ERROR = {
-    INVALID_CREDENTIALS: 401,
     NOT_SIGNED_IN: 401,
-    HANDLE_TAKEN: 409,
 };
 
 function send_error(res, e) {
@@ -27,64 +26,19 @@ function handler(action) {
     };
 }
 
+// What the frontend knows about the signed-in player. `email` is null for an account that has none yet.
 function public_profile(user) {
-    return {handle: user.handle, name: user.name};
-}
-
-// A fresh session id on every sign-in, so an id planted before signing in (session fixation) is useless.
-function start_session(req, user) {
-    return new Promise(function (resolve, reject) {
-        req.session.regenerate(function (error) {
-            if (error) return reject(error);
-            req.session.handle = user.handle;
-            resolve();
-        });
-    });
-}
-
-async function signup(req, res) {
-    const {handle, name, password} = validate_signup(req.body);
-    let user;
-    try {
-        user = await db_user.create_user({handle, name, password_hash: await hash_password(password)});
-    } catch (e) {
-        if (e === 'HANDLE_TAKEN') throw new UserError('HANDLE_TAKEN', 'That handle is taken. Pick another one.');
-        throw e;
-    }
-    await start_session(req, user);
-    res.status(201).send(public_profile(user));
-}
-
-// Checked when the handle doesn't exist, so an unknown handle takes as long as a wrong password and
-// response times don't reveal which handles are registered.
-const unknown_user_hash = hash_password('no account has this password');
-
-async function signin(req, res) {
-    const {password} = req.body;
-    const handle = normalize_handle(req.body.handle);
-    const user = handle === '' ? undefined : await db_user.find_credentials({handle});
-    const is_valid = await verify_password(password, user ? user.password_hash : await unknown_user_hash);
-    if (user === undefined || !is_valid) {
-        throw new UserError('INVALID_CREDENTIALS', "That handle and password don't match.");
-    }
-    await start_session(req, user);
-    res.send(public_profile(user));
-}
-
-// Works with or without a session, so a client can always sign out cleanly.
-async function signout(req, res) {
-    await new Promise(function (resolve, reject) {
-        req.session.destroy(function (error) {
-            if (error) return reject(error);
-            resolve();
-        });
-    });
-    res.clearCookie('connect.sid');
-    res.status(204).send();
+    return {
+        handle: user.handle,
+        name: user.name,
+        email: real_email(user.email),
+        email_verified: user.email_verified,
+        image: user.image,
+    };
 }
 
 async function profile(req, res) {
-    const user = await db_user.get_user({handle: req.session.handle});
+    const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
     }
@@ -102,7 +56,7 @@ function positive_integer(value, fallback) {
 
 /** GET /user/rooms?page=1&per_page=10: one page of the user's tables, newest first, with the totals for paging. */
 async function rooms(req, res) {
-    const user = await db_user.get_user({handle: req.session.handle});
+    const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
     }
@@ -115,7 +69,7 @@ async function rooms(req, res) {
 
 /** GET /user/current-game: {room} for the game in progress you sat at that moved last, or {room: null}. */
 async function current_game(req, res) {
-    const user = await db_user.get_user({handle: req.session.handle});
+    const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
     }
@@ -123,9 +77,6 @@ async function current_game(req, res) {
 }
 
 module.exports = {
-    signup: handler(signup),
-    signin: handler(signin),
-    signout: handler(signout),
     profile: handler(profile),
     rooms: handler(rooms),
     current_game: handler(current_game),

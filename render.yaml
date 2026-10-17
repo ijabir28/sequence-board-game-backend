@@ -16,9 +16,11 @@ services:
         sync: false
       - key: DATABASE_URL_UNPOOLED
         sync: false
+      # Signs session cookies and emailed links (Better Auth, see auth.js).
       - key: SESSION_SECRET
         generateValue: true
-      - key: COOKIE_SECURE
-        value: "true"
+      # The address players open; emailed links point here and other origins are refused.
+      - key: BETTER_AUTH_URL
+        value: https://sequence-board-game-zn2z.onrender.com
       - key: TRUST_PROXY
         value: "1"

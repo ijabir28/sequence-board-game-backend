@@ -21,7 +21,8 @@ describe_with_database('rooms and table games', function () {
 
     async function sign_up(handle) {
         agents[handle] = request.agent(app);
-        await agents[handle].post('/user/signup').send({handle, name: `P ${handle}`, password: 'long enough'}).expect(201);
+        await agents[handle].post('/api/auth/sign-up/email')
+            .send({username: handle, name: `P ${handle}`, email: `${handle}@example.test`, password: 'long enough'}).expect(200);
     }
 
     async function open_room(handle, teams = 2, players = 1, settings = {}) {
@@ -335,8 +336,8 @@ describe_with_database('rooms and table games', function () {
             // A fresh copy of every module: nothing can come from process memory.
             jest.resetModules();
             const restarted = require('../app');
-            const cookie = (await request(restarted).post('/user/signin')
-                .send({handle: 'bob', password: 'long enough'})).headers['set-cookie'][0].split(';')[0];
+            const cookie = (await request(restarted).post('/api/auth/sign-in/username')
+                .send({username: 'bob', password: 'long enough'})).headers['set-cookie'][0].split(';')[0];
             const room = (await request(restarted).get(`/room/${id}`)).body;
             expect(room.teams[1].players[0].handle).toBe('dave');
             expect(room).toMatchObject({name: 'Resume me', game_started: true, settings: {highlights: false, auto_draw_dead: true}});

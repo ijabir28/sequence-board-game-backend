@@ -2,7 +2,7 @@
 # Used by Render (render.yaml); see docs/deploy.md. Local development uses docker-compose.yml instead.
 #
 #   docker build -t sequence .
-#   docker run -p 3000:3000 -e DATABASE_URL=... -e SESSION_SECRET=... sequence
+#   docker run -p 3000:3000 -e DATABASE_URL=... -e SESSION_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 sequence
 
 # --- Frontend: cloned and built from GitHub ---
 FROM node:24-alpine AS frontend
@@ -19,7 +19,7 @@ RUN npm ci && npm run build
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev
 COPY . .
 COPY --from=frontend /frontend/dist ./frontend-dist

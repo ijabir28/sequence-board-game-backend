@@ -1,5 +1,5 @@
-// The session module opens the database pool; presence only needs its secret.
-jest.mock('../session', function () {
+// The auth module opens the database pool; presence only needs its secret.
+jest.mock('../auth', function () {
     return {session_secret: () => 'test secret'};
 });
 const presence = require('./presence');
