@@ -60,7 +60,7 @@ socket.js             Single Socket.IO server + broadcast({event, data}) to ever
 
 routes/               Thin routers: auth (Better Auth + rate limits), user, room, game, board
 controller/
-  user.js             profile, the user's rooms and current game (JSON errors)
+  user.js             profile and stats, avatars, the user's rooms and current game (JSON errors)
   room.js             create / get / join room, change its settings (host only), broadcasts room_updated
   room_game.js        start a table's game, view it, play / exchange / pass; broadcasts game_updated; turn timer,
                       pauses the turn of a player who is away from the table
@@ -71,18 +71,20 @@ controller/
 database/
   pool.js             PostgreSQL connection pool (DATABASE_URL) and ping() for /health
   migrate.js          SQL migration runner (also `npm run db:migrate`), tested in migrate.spec.js
-  migrations/         Numbered .sql files: 0001 users, 0002 session, 0003 rooms + room_seats, 0004 games + turns,
+  migrations/         Numbered .sql files (0012 user_avatars): 0001 users, 0002 session, 0003 rooms + room_seats, 0004 games + turns,
                       0005 room names, slug codes and settings, 0006 game mode,
                       0007 highlights and history off by default, 0008 turn timer,
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables
-  users.js            Reads accounts from the users table (Better Auth writes them)
+  users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
   rooms.js            Rooms and seats; join() takes a seat under a room lock; list_for_user() for history
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
 entity/               Domain layer (tested)
   user.js             Handle and display name rules, scrypt password hashing
-  emails.js           Account emails: confirmation, password reset, password changed, already registered
+  emails.js           Account emails: confirmation, password reset, password changed, already registered,
+                      approving a new email
+  avatar.js           Which avatar uploads are accepted (PNG, JPEG, WebP by their bytes, 256 KB)
   room.js             Room names, slug codes and settings (defaults and parsing), game modes
   hints.js            Training hints: suggest_move() for the current player
   sequence_game.js    Full rules for table games: dealing, turns, jacks, dead cards, sequences, win. Wired to HTTP
@@ -181,6 +183,11 @@ refuses accounts with an unconfirmed address and emails a fresh link. Accounts m
 own `requireEmailVerification` can't make that exception. Password reset links work once, for an hour; a reset signs
 out every device. Emails go out in the background, so the answer (and its timing) never shows whether an address has
 an account. Without `SMTP_URL` they are printed to the server log, which is how to get the links in development.
+
+Players manage their account from the frontend's profile page: display name, email and password through Better Auth,
+avatars through `/user/avatar`. Avatars are stored in PostgreSQL (`user_avatars`, a few kilobytes each after the
+frontend shrinks them), so there is no file storage to run; `users.image` holds the versioned URL that serves the
+current one. Handles never change, since games and socket tokens refer to players by handle.
 
 | Variable | Default | Purpose |
 |---|---|---|

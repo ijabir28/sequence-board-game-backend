@@ -1,12 +1,15 @@
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
 const {UserError, real_email} = require('../entity/user');
+const {check_avatar} = require('../entity/avatar');
 
 // The signed-in player's endpoints. Signing up, in and out is Better Auth's (/api/auth, see auth.js).
 // Errors are JSON: {error: CODE, message}, like the table game endpoints.
 
 const STATUS_BY_ERROR = {
     NOT_SIGNED_IN: 401,
+    IMAGE_TOO_LARGE: 413,
+    UNSUPPORTED_MEDIA_TYPE: 415,
 };
 
 function send_error(res, e) {
@@ -27,22 +30,67 @@ function handler(action) {
 }
 
 // What the frontend knows about the signed-in player. `email` is null for an account that has none yet.
-function public_profile(user) {
+function public_profile(user, stats) {
     return {
         handle: user.handle,
         name: user.name,
         email: real_email(user.email),
         email_verified: user.email_verified,
         image: user.image,
+        created_at: user.created_at,
+        stats,
     };
 }
 
-async function profile(req, res) {
+async function signed_in_user(req) {
     const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
     }
-    res.send(public_profile(user));
+    return user;
+}
+
+async function profile(req, res) {
+    const user = await signed_in_user(req);
+    res.send(public_profile(user, await db_user.stats({user_id: user.id})));
+}
+
+/** PUT /user/avatar, the picture as the raw body (PNG, JPEG or WebP): 200 {image}, the URL that now serves it. */
+async function upload_avatar(req, res) {
+    const user = await signed_in_user(req);
+    // The raw body parser (routes/user.js) only reads the accepted types; anything else leaves the body unread.
+    if (!Buffer.isBuffer(req.body)) {
+        throw new UserError('UNSUPPORTED_MEDIA_TYPE', 'Choose a PNG, JPEG or WebP picture.');
+    }
+    const checked = check_avatar(req.body);
+    if (checked.error) {
+        throw new UserError(checked.error, checked.message);
+    }
+    const image = await db_user.set_avatar({user_id: user.id, content_type: checked.content_type, data: req.body});
+    res.send({image});
+}
+
+/** DELETE /user/avatar: 204, back to the initials. */
+async function remove_avatar(req, res) {
+    const user = await signed_in_user(req);
+    await db_user.delete_avatar({user_id: user.id});
+    res.status(204).send();
+}
+
+/** GET /user/avatar/:id: anyone's avatar, as its image, or 404. Its URL changes with every upload, so it is cached. */
+async function avatar(req, res) {
+    const found = await db_user.get_avatar({user_id: req.params.id});
+    if (found === undefined) {
+        return res.status(404).send({error: 'NOT_FOUND', message: 'No such picture.'});
+    }
+    res.set({
+        'Content-Type': found.content_type,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        // Only ever shown as an image, never run or sniffed as anything else.
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+        'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(found.data);
 }
 
 // The signed-in user's tables, newest first: where they sat and how far each game got.
@@ -56,10 +104,7 @@ function positive_integer(value, fallback) {
 
 /** GET /user/rooms?page=1&per_page=10: one page of the user's tables, newest first, with the totals for paging. */
 async function rooms(req, res) {
-    const user = await db_user.get_user({handle: req.handle});
-    if (user === undefined) {
-        throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
-    }
+    const user = await signed_in_user(req);
     const per_page = Math.min(positive_integer(req.query.per_page, ROOMS_PER_PAGE.default), ROOMS_PER_PAGE.max);
     const page = positive_integer(req.query.page, 1);
     const total = await db_room.count_for_user({user_id: user.id});
@@ -69,15 +114,15 @@ async function rooms(req, res) {
 
 /** GET /user/current-game: {room} for the game in progress you sat at that moved last, or {room: null}. */
 async function current_game(req, res) {
-    const user = await db_user.get_user({handle: req.handle});
-    if (user === undefined) {
-        throw new UserError('NOT_SIGNED_IN', 'Sign in first.');
-    }
+    const user = await signed_in_user(req);
     res.send({room: (await db_room.current_for_user({user_id: user.id})) || null});
 }
 
 module.exports = {
     profile: handler(profile),
+    upload_avatar: handler(upload_avatar),
+    remove_avatar: handler(remove_avatar),
+    avatar: handler(avatar),
     rooms: handler(rooms),
     current_game: handler(current_game),
 };

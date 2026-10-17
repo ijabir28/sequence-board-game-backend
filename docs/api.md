@@ -63,8 +63,37 @@ address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 mi
 Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name, email, email_verified, image}`, or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed
-in?". `email` is `null` for accounts made before emails were asked for; `image` is the avatar's URL or `null`.
+`200 {handle, name, email, email_verified, image, created_at, stats: {played, won, playing}}`, or
+`401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before emails
+were asked for; `image` is the avatar's URL or `null`. `stats` counts the table games the player has a seat in:
+finished (`played`), won by their team (`won`) and in progress (`playing`).
+
+### `PUT /user/avatar` (auth)
+The picture as the raw body, `Content-Type` `image/png`, `image/jpeg` or `image/webp`, at most 256 KB (the frontend
+crops and shrinks it to 256×256 first). The type is read from the bytes. `200 {image}`, the URL that now serves it,
+also in `users.image`. `415 UNSUPPORTED_MEDIA_TYPE` for another content type (SVG included), `400 INVALID_IMAGE` when
+the bytes aren't one of those formats, `413 IMAGE_TOO_LARGE`.
+
+### `DELETE /user/avatar` (auth)
+`204`; `image` goes back to `null`.
+
+### `GET /user/avatar/:id`
+Anyone's avatar, as its image, or `404 NOT_FOUND`. The URL carries a version (`?v=…`) that changes with every upload,
+so the response is cached for a year. It is served with `nosniff` and a sandboxing Content-Security-Policy.
+
+### Profile changes (Better Auth)
+All need the session cookie and a trusted `Origin`.
+- `POST /api/auth/update-user {name}`: the display name, with the rule above (`400 INVALID_NAME`). The handle can't
+  change (`400 USERNAME_IS_IMMUTABLE`: games and socket tokens refer to players by it), and `image` can't be set here
+  (`400 IMAGE_READ_ONLY`).
+- `POST /api/auth/change-email {newEmail, callbackURL: "/profile"}`: `200` and nothing changes yet. If the current
+  address is confirmed, it is emailed a link to approve the move; then (or straight away for an account without an
+  email, or an unconfirmed one) the new address gets a link that confirms it and makes the change. Both links redirect
+  to `callbackURL`. An address that already has an account answers the same and changes nothing.
+- `POST /api/auth/change-password {currentPassword, newPassword, revokeOtherSessions: true}`: `200`, every other
+  session is deleted and a "password changed" email goes out. `400 INVALID_PASSWORD` for a wrong current password.
+- `GET /api/auth/list-sessions`: the account's sessions (`createdAt`, `updatedAt`, `userAgent`, `token`, …).
+  `POST /api/auth/revoke-other-sessions {}` deletes all but this one.
 
 ### `GET /user/rooms` (auth)
 One page of the tables you created or sat at, newest first. Query `page` (from 1, default 1) and `per_page`

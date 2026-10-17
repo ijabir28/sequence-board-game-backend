@@ -2,38 +2,9 @@
 // Need PostgreSQL, see database/test_database.js.
 const request = require('supertest');
 const {has_database, use_test_schema} = require('../database/test_database');
+const {SESSION_COOKIE, session_cookie, link_in, insert_legacy_user, verified_account: verified} = require('./test_accounts');
 
 const describe_with_database = has_database ? describe : describe.skip;
-
-const SESSION_COOKIE = 'sequence.session_token';
-
-// The `name=value` of the session cookie a response sets, or undefined.
-function session_cookie(response) {
-    const cookies = response.headers['set-cookie'] || [];
-    const cookie = cookies.find(function (c) {
-        return c.startsWith(`${SESSION_COOKIE}=`);
-    });
-    return cookie && cookie.split(';')[0];
-}
-
-// An account made before Better Auth, as migration 0011 leaves it: placeholder email, password in auth_accounts.
-async function insert_legacy_user(pool, {handle, name, password}) {
-    const {hash_password} = require('../entity/user');
-    const {rows} = await pool.query(
-        "INSERT INTO users (handle, name, email) VALUES ($1, $2, $1 || '@no-email.invalid') RETURNING id",
-        [handle, name]
-    );
-    await pool.query(
-        "INSERT INTO auth_accounts (user_id, account_id, provider_id, password) VALUES ($1, $2, 'credential', $3)",
-        [rows[0].id, String(rows[0].id), await hash_password(password)]
-    );
-}
-
-// The path of the first link in an email, for supertest (links are absolute, on BETTER_AUTH_URL).
-function link_in(mail) {
-    const url = new URL(mail.text.match(/https?:\/\/\S+/)[0]);
-    return url.pathname + url.search;
-}
 
 describe_with_database('accounts', function () {
     let database;
@@ -47,12 +18,8 @@ describe_with_database('accounts', function () {
         });
     }
 
-    // Signs up and confirms the email by following the emailed link; resolves to the agent, now signed in.
-    async function verified_account({username, email, password = 'long enough'}) {
-        await request(app).post('/api/auth/sign-up/email').send({username, name: 'Someone', email, password}).expect(200);
-        const agent = request.agent(app);
-        await agent.get(link_in(mail_to(email).pop())).expect(302);
-        return agent;
+    function verified_account(account) {
+        return verified(request, app, account);
     }
 
     beforeAll(async function () {
@@ -79,7 +46,7 @@ describe_with_database('accounts', function () {
             expect(response.headers['set-cookie'].join()).toMatch(/sequence\.session_token=.*HttpOnly.*SameSite=Lax/);
 
             const profile = await agent.get('/user/profile');
-            expect(profile.body).toEqual({
+            expect(profile.body).toMatchObject({
                 handle: 'jabir', name: 'Jabir ibne kamal', email: null, email_verified: false, image: null,
             });
         });

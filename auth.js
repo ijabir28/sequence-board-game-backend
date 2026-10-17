@@ -8,7 +8,7 @@
 //   verification -> auth_verifications
 // Migration 0011 creates them; Better Auth's own migration tool is not used.
 const {betterAuth} = require('better-auth');
-const {APIError, createAuthMiddleware, createEmailVerificationToken} = require('better-auth/api');
+const {APIError, createAuthMiddleware, createEmailVerificationToken, isAPIError} = require('better-auth/api');
 const {username} = require('better-auth/plugins');
 const {fromNodeHeaders} = require('better-auth/node');
 const {pool} = require('./database/pool');
@@ -62,9 +62,14 @@ function trusted_origins() {
     return origins;
 }
 
-// Display names follow our rule (entity/user.js), not Better Auth's, which accepts any string.
-const check_display_name = createAuthMiddleware(async function (ctx) {
+// Before sign-up and profile changes. Display names follow our rule (entity/user.js), not Better Auth's, which accepts
+// any string. Avatars are uploaded to PUT /user/avatar, which sets `image`; a client setting it to any URL it likes
+// (a tracking pixel, say) is refused.
+const check_user_fields = createAuthMiddleware(async function (ctx) {
     if (ctx.path !== '/sign-up/email' && ctx.path !== '/update-user') return;
+    if (ctx.body.image !== undefined) {
+        throw new APIError('BAD_REQUEST', {code: 'IMAGE_READ_ONLY', message: 'Upload a picture to change your avatar.'});
+    }
     if (ctx.path === '/update-user' && ctx.body.name === undefined) return;
     const result = validate_name(ctx.body.name);
     if (result.error) {
@@ -115,6 +120,13 @@ async function require_verified_email(session) {
     });
 }
 
+// After a successful password change, tell the account's address, in case it wasn't its owner.
+const notify_password_change = createAuthMiddleware(async function (ctx) {
+    if (ctx.path !== '/change-password' || isAPIError(ctx.context.returned) || !ctx.context.session) return;
+    const {user} = ctx.context.session;
+    send_in_background(Object.assign({to: user.email}, emails.password_changed({name: user.name})));
+});
+
 const auth = betterAuth({
     appName: 'Sequence',
     baseURL: base_url(),
@@ -125,6 +137,18 @@ const auth = betterAuth({
     user: {
         modelName: 'users',
         fields: {emailVerified: 'email_verified', createdAt: 'created_at', updatedAt: 'updated_at'},
+        // POST /change-email {newEmail, callbackURL}. The new address gets a link, and the email only changes when it
+        // is opened. An account whose current address is confirmed must approve the move from it first, so a
+        // borrowed session can't quietly take the account over. Accounts with the placeholder go straight to the
+        // link for the new address.
+        changeEmail: {
+            enabled: true,
+            sendChangeEmailConfirmation: async function ({user, newEmail, url}) {
+                send_in_background(Object.assign({to: user.email}, emails.approve_email_change({
+                    name: user.name, new_email: newEmail, url, hours: VERIFY_EMAIL_SECONDS / HOUR_SECONDS,
+                })));
+            },
+        },
     },
     account: {
         modelName: 'auth_accounts',
@@ -186,9 +210,12 @@ const auth = betterAuth({
     emailVerification: {
         sendOnSignUp: true,
         sendVerificationEmail: async function ({user, url}) {
-            // Links always land on our page, whatever callbackURL the request asked for.
+            // Links land on our page unless the request named another one of ours (the profile does, for a new
+            // email); Better Auth has already checked that it is relative or on a trusted origin.
             const link = new URL(url);
-            link.searchParams.set('callbackURL', EMAIL_VERIFIED_PAGE);
+            if (link.searchParams.get('callbackURL') === '/') {
+                link.searchParams.set('callbackURL', EMAIL_VERIFIED_PAGE);
+            }
             send_verification_email(user, link.toString());
         },
         expiresIn: VERIFY_EMAIL_SECONDS,
@@ -202,6 +229,8 @@ const auth = betterAuth({
         // Players sign in with their handle. The display name is the user's `name`, so no displayUsername.
         username({
             displayUsername: false,
+            // Games, seats and socket tokens refer to players by handle, so it never changes.
+            immutableUsername: true,
             schema: {user: {fields: {username: 'handle'}}},
             minUsernameLength: 3,
             maxUsernameLength: 20,
@@ -212,7 +241,7 @@ const auth = betterAuth({
             },
         }),
     ],
-    hooks: {before: check_display_name},
+    hooks: {before: check_user_fields, after: notify_password_change},
     advanced: {
         cookiePrefix: 'sequence',
         // Refuse requests from origins outside trustedOrigins. Better Auth skips this under NODE_ENV=test unless
