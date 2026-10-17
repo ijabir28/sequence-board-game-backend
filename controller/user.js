@@ -1,6 +1,6 @@
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
-const {UserError, real_email} = require('../entity/user');
+const {UserError, real_email, validate_card_deck} = require('../entity/user');
 const {check_avatar} = require('../entity/avatar');
 
 // The signed-in player's endpoints. Signing up, in and out is Better Auth's (/api/auth, see auth.js).
@@ -37,6 +37,7 @@ function public_profile(user, stats) {
         email: real_email(user.email),
         email_verified: user.email_verified,
         image: user.image,
+        card_deck: user.card_deck,
         created_at: user.created_at,
         stats,
     };
@@ -93,6 +94,17 @@ async function avatar(req, res) {
     res.send(found.data);
 }
 
+/** PUT /user/card-deck {card_deck}: 200 {card_deck}, the deck the player's hand is shown in on every device. */
+async function set_card_deck(req, res) {
+    const user = await signed_in_user(req);
+    const checked = validate_card_deck(req.body && req.body.card_deck);
+    if (checked.error) {
+        throw new UserError('INVALID_CARD_DECK', checked.error);
+    }
+    await db_user.set_card_deck({user_id: user.id, card_deck: checked.card_deck});
+    res.send({card_deck: checked.card_deck});
+}
+
 // The signed-in user's tables, newest first: where they sat and how far each game got.
 const ROOMS_PER_PAGE = {default: 10, max: 50};
 
@@ -123,6 +135,7 @@ module.exports = {
     upload_avatar: handler(upload_avatar),
     remove_avatar: handler(remove_avatar),
     avatar: handler(avatar),
+    set_card_deck: handler(set_card_deck),
     rooms: handler(rooms),
     current_game: handler(current_game),
 };

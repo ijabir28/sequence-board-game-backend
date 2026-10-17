@@ -2,7 +2,7 @@ const {pool, transaction} = require('./pool');
 const {avatar_url} = require('../entity/avatar');
 
 // Better Auth (auth.js) creates and changes accounts; the game reads them, and keeps their avatars.
-const PUBLIC_COLUMNS = 'id, handle, name, email, email_verified, image, created_at';
+const PUBLIC_COLUMNS = 'id, handle, name, email, email_verified, image, card_deck, created_at';
 
 async function get_user({handle}) {
     if (typeof handle !== 'string') {
@@ -56,4 +56,8 @@ async function get_avatar({user_id}) {
     return rows[0];
 }
 
-module.exports = {get_user, stats, set_avatar, delete_avatar, get_avatar};
+async function set_card_deck({user_id, card_deck}) {
+    await pool.query('UPDATE users SET card_deck = $2, updated_at = now() WHERE id = $1', [user_id, card_deck]);
+}
+
+module.exports = {get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck};

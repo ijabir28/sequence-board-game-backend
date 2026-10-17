@@ -66,9 +66,10 @@ address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 mi
 Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name, email, email_verified, image, created_at, stats: {played, won, playing}}`, or
+`200 {handle, name, email, email_verified, image, card_deck, created_at, stats: {played, won, playing}}`, or
 `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before emails
-were asked for; `image` is the avatar's URL or `null`. `stats` counts the table games the player has a seat in:
+were asked for; `image` is the avatar's URL or `null`; `card_deck` is the hand card deck the player chose (see
+`PUT /user/card-deck`) or `null`. `stats` counts the table games the player has a seat in:
 finished (`played`), won by their team (`won`) and in progress (`playing`).
 
 ### `PUT /user/avatar` (auth)
@@ -83,6 +84,11 @@ the bytes aren't one of those formats, `413 IMAGE_TOO_LARGE`.
 ### `GET /user/avatar/:id`
 Anyone's avatar, as its image, or `404 NOT_FOUND`. The URL carries a version (`?v=…`) that changes with every upload,
 so the response is cached for a year. It is served with `nosniff` and a sandboxing Content-Security-Policy.
+
+### `PUT /user/card-deck {card_deck}` (auth)
+The design the player's hand is shown in, kept on the account so it follows them to every device. The frontend owns
+the list of decks (its `src/decks/decks.ts`), so the server only checks the id's shape: 1 to 32 lowercase letters,
+digits or dashes. `200 {card_deck}`, or `400 INVALID_CARD_DECK`.
 
 ### Profile changes (Better Auth)
 All need the session cookie and a trusted `Origin`.

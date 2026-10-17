@@ -110,6 +110,25 @@ describe_with_database('profile', function () {
         });
     });
 
+    describe('card deck', function () {
+        test('is null until chosen, then saved on the account', async function () {
+            expect((await player.get('/user/profile')).body.card_deck).toBeNull();
+            const saved = await player.put('/user/card-deck').send({card_deck: 'jumbo'});
+            expect([saved.status, saved.body]).toEqual([200, {card_deck: 'jumbo'}]);
+            expect((await player.get('/user/profile')).body.card_deck).toBe('jumbo');
+        });
+
+        test('refuses something that is not a deck id', async function () {
+            const response = await player.put('/user/card-deck').send({card_deck: '<script>'});
+            expect([response.status, response.body.error]).toEqual([400, 'INVALID_CARD_DECK']);
+            expect((await player.get('/user/profile')).body.card_deck).toBe('jumbo');
+        });
+
+        test('needs a session', async function () {
+            expect((await request(app).put('/user/card-deck').send({card_deck: 'classic'})).status).toBe(401);
+        });
+    });
+
     describe('password', function () {
         test('changes with the current one, signs out other devices and tells the owner', async function () {
             const other_device = await verified_account(request, app, {username: 'changer', email: 'changer@example.test'});
