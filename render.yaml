@@ -21,7 +21,7 @@ services:
         generateValue: true
       # The address players open; emailed links point here and other origins are refused.
       - key: BETTER_AUTH_URL
-        value: https://sequence-board-game-zn2z.onrender.com
+        value: https://sequence-board-game-svxj.onrender.com
       # Account emails (see docs/deploy.md#email). Set in the dashboard: the URL holds the SMTP password.
       - key: SMTP_URL
         sync: false
