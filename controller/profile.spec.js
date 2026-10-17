@@ -177,19 +177,36 @@ describe_with_database('profile', function () {
     });
 
     describe('sessions', function () {
-        test('lists the devices signed in and signs out all but this one', async function () {
+        test('signing in on another device signs this one out, and tells its open pages', async function () {
+            const socket_server = require('../socket');
+            const sent = jest.spyOn(socket_server, 'broadcast');
             const laptop = request.agent(app);
             await laptop.post('/api/auth/sign-in/username').send({username: 'player', password: 'long enough'}).expect(200);
 
-            const listed = await player.get('/api/auth/list-sessions');
-            expect(listed.status).toBe(200);
-            expect(listed.body.length).toBeGreaterThanOrEqual(2);
+            expect((await player.get('/user/profile')).status).toBe(401);
+            expect((await laptop.get('/user/profile')).status).toBe(200);
+            expect((await laptop.get('/api/auth/list-sessions')).body).toHaveLength(1);
+            expect(sent).toHaveBeenCalledWith({event: 'signed_in_elsewhere', data: {handle: 'player'}});
+            sent.mockRestore();
 
-            const revoked = await player.post('/api/auth/revoke-other-sessions').set('Origin', ORIGIN).send({});
-            expect(revoked.status).toBe(200);
+            // And back: the first device signs in again, which signs the laptop out.
+            await player.post('/api/auth/sign-in/username').set('Origin', ORIGIN).send({username: 'player', password: 'long enough'}).expect(200);
             expect((await laptop.get('/user/profile')).status).toBe(401);
             expect((await player.get('/user/profile')).status).toBe(200);
-            expect((await player.get('/api/auth/list-sessions')).body).toHaveLength(1);
+        });
+
+        test("a first sign-in doesn't announce anything", async function () {
+            await verified_account(request, app, {username: 'loner', email: 'loner@example.test'});
+            const socket_server = require('../socket');
+            const sent = jest.spyOn(socket_server, 'broadcast');
+            const agent = request.agent(app);
+            // Confirming the email signed this account in once; signing in here replaces that session.
+            await agent.post('/api/auth/sign-in/username').send({username: 'loner', password: 'long enough'}).expect(200);
+            expect(sent).toHaveBeenCalledTimes(1);
+            await agent.post('/api/auth/sign-out').set('Origin', ORIGIN).send({}).expect(200);
+            await agent.post('/api/auth/sign-in/username').set('Origin', ORIGIN).send({username: 'loner', password: 'long enough'}).expect(200);
+            expect(sent).toHaveBeenCalledTimes(1);
+            sent.mockRestore();
         });
     });
 });
