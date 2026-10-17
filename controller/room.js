@@ -154,6 +154,7 @@ async function room_payload({id}) {
     if (room === undefined) {
         return undefined;
     }
+    const game = await db_game.get({room_id: id});
     return {
         id: room.id,
         name: room.name,
@@ -162,7 +163,10 @@ async function room_payload({id}) {
         settings: room.settings,
         teams: room.teams,
         created_at: room.created_at,
-        game_started: await db_game.get({room_id: id}) !== undefined,
+        game_started: game !== undefined,
+        // The round being played (or just won), and whether the host has ended the rounds.
+        round: game === undefined ? null : game.round,
+        rounds_over: room.rounds_ended_at !== null,
     };
 }
 

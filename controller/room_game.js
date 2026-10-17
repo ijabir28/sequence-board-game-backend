@@ -5,6 +5,7 @@ const socket_server = require('../socket');
 const {broadcast_room} = require('./room');
 const {RuleError, create_game, apply_move, view_for, random_move} = require('../entity/sequence_game');
 const {suggest_move} = require('../entity/hints');
+const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
 
 // A game played at a room's table. Errors are JSON: {error: CODE, message}.
@@ -19,6 +20,8 @@ const STATUS_BY_ERROR = {
     TABLE_NOT_FULL: 409,
     NOT_YOUR_TURN: 409,
     GAME_OVER: 409,
+    ROUND_IN_PROGRESS: 409,
+    ROUNDS_OVER: 409,
     HISTORY_DISABLED: 403,
 };
 
@@ -30,6 +33,8 @@ class GameError extends Error {
 }
 
 function send_error(res, e) {
+    // The answer went out and a broadcast after it failed: nothing is left to tell the client.
+    if (res.headersSent) return console.error(e);
     if (e instanceof GameError || e instanceof RuleError) {
         return res.status(STATUS_BY_ERROR[e.code] || 400).send({error: e.code, message: e.message});
     }
@@ -104,9 +109,28 @@ function away_players(room, game) {
         });
 }
 
+// The statistics the round is saved with once it's won (none while it is played).
+function stats_for(next) {
+    return next.winner === null ? null : round_stats(next);
+}
+
+// Where the table is in its rounds, for the game view: {round, over, results, summary}. `results` are the won
+// rounds' statistics (the current one too once it's won), and `summary` the final result once the host has ended
+// the rounds, else null.
+async function rounds_of(room, game, client) {
+    const won = await db_game.list_rounds({room_id: room.id, client});
+    const results = won.map(function (round) {
+        // A round won before statistics were kept: the current one can still be summed up from its state.
+        const stats = round.stats || (round.round === game.round ? round_stats(game) : null);
+        return {round: round.round, winner: round.winner, started_at: round.started_at, finished_at: round.finished_at, stats};
+    });
+    const over = room.rounds_ended_at !== null && room.rounds_ended_at !== undefined;
+    return {round: game.round || 1, over, results, summary: over ? series_summary(results, game.team_count) : null};
+}
+
 // The game as `handle` sees it, under the room's settings. Hints exist only in training games, and only for the
-// player whose turn it is, so a standard game never sends one.
-function view(room, game, handle) {
+// player whose turn it is, so a standard game never sends one. `rounds` is from rounds_of().
+function view(room, game, handle, rounds) {
     const seen = view_for(game, handle, room.settings);
     const hint = room.settings.mode === 'training' && seen.current_player !== null && seen.current_player === handle
         ? suggest_move(game)
@@ -118,6 +142,9 @@ function view(room, game, handle) {
     });
     return Object.assign(seen, {
         name: room.name,
+        // The host deals each round, and decides after one is won whether to play another.
+        host: room.administrator,
+        rounds,
         hint,
         turn_started_at: game.turn_started_at || null,
         turn_deadline: deadline === null ? null : deadline.toISOString(),
@@ -161,7 +188,7 @@ function handler(action) {
 async function start(req, res) {
     const {id} = req.params;
     const handle = signed_in_handle(req);
-    const {room, game} = await transaction(async function (client) {
+    const {room, game, rounds} = await transaction(async function (client) {
         const room = await find_room(id, client);
         if (room.administrator !== handle) {
             throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, can start its game.`);
@@ -173,20 +200,67 @@ async function start(req, res) {
 
         // Players are still on the table page, so the first turn usually starts paused until its player opens the game.
         const now = new Date();
-        const created = follow_presence(room, stamp_turn(undefined, create_game({teams: room.teams, rules: room.settings}), now), now);
+        const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings}), {round: 1});
+        const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
         await db_game.create({room_id: id, state: created, turn_deadline: turn_deadline(room, created), client});
-        return {room, game: created};
+        return {room, game: created, rounds: await rounds_of(room, created, client)};
     });
-    res.send(view(room, game, handle));
+    res.send(view(room, game, handle, rounds));
     broadcast_game(id);
     await broadcast_room({id});
 }
 
-/** GET /room/:id/game: the game as the signed-in player sees it (only their own hand). */
+/** GET /room/:id/game: the current round's game as the signed-in player sees it (only their own hand). */
 async function get(req, res) {
     const {room, game} = await find_game(req.params.id);
-    res.send(view(room, game, req.handle));
+    res.send(view(room, game, req.handle, await rounds_of(room, game)));
 }
+
+// The host's decision once a round is won: `decide(room, game, client)` runs with the room and the round locked,
+// after checking the round is over and the rounds go on. Answers with the game view and tells every player.
+function host_decision(decide) {
+    return handler(async function (req, res) {
+        const {id} = req.params;
+        const handle = signed_in_handle(req);
+        const {room, game, rounds} = await transaction(async function (client) {
+            const room = await find_room(id, client);
+            if (room.administrator !== handle) {
+                throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, decides whether to play another round.`);
+            }
+            const current = await db_game.get({room_id: id, client, lock: true});
+            if (current === undefined) throw new GameError('GAME_NOT_FOUND', "This table's game hasn't started yet.");
+            if (room.rounds_ended_at !== null) throw new GameError('ROUNDS_OVER', "This table's rounds are over.");
+            if (current.winner === null) throw new GameError('ROUND_IN_PROGRESS', 'This round is still being played.');
+            const decided = await decide(room, current, client);
+            return Object.assign({}, decided, {rounds: await rounds_of(decided.room, decided.game, client)});
+        });
+        res.send(view(room, game, handle, rounds));
+        broadcast_game(id);
+        await broadcast_room({id});
+    });
+}
+
+/** POST /room/:id/rounds/next: the host deals another round with the same teams, once the current one is won. */
+const next_round = host_decision(async function (room, current, client) {
+    // A round won before statistics were kept gets them now, while its state is at hand.
+    const won = await db_game.list_rounds({room_id: room.id, client});
+    if (won.some(function (round) {
+        return round.round === current.round && round.stats === null;
+    })) {
+        await db_game.save_stats({room_id: room.id, round: current.round, stats: round_stats(current), client});
+    }
+    const now = new Date();
+    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings}), {round: current.round + 1});
+    const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
+    await db_game.create({room_id: room.id, state: created, turn_deadline: turn_deadline(room, created), client});
+    return {room, game: created};
+});
+
+/** POST /room/:id/rounds/end: the host ends the rounds once one is won. The view then carries the final summary. */
+const end_rounds = host_decision(async function (room, current, client) {
+    await db_room.end_rounds({id: room.id, client});
+    return {room: await db_room.get({id: room.id, client}), game: current};
+});
 
 /** GET /room/:id/turns: every move so far, oldest first. Public, like the game view, unless the room turned history off. */
 async function turns(req, res) {
@@ -200,7 +274,7 @@ function move_handler(build_move) {
         const {id} = req.params;
         const handle = signed_in_handle(req);
         const move = build_move(req.body || {});
-        const {room, next} = await transaction(async function (client) {
+        const {room, next, rounds} = await transaction(async function (client) {
             const {room, game} = await find_game(id, client);
             const seated = game.players.some(function (player) {
                 return player.handle === handle;
@@ -209,10 +283,13 @@ function move_handler(build_move) {
 
             const now = new Date();
             const played = follow_presence(room, stamp_turn(game, apply_move(game, handle, move), now), now, handle);
-            await db_game.record_move({room_id: id, previous: game, next: played, handle, move, turn_deadline: turn_deadline(room, played), client});
-            return {room, next: played};
+            await db_game.record_move({
+                room_id: id, previous: game, next: played, handle, move,
+                turn_deadline: turn_deadline(room, played), stats: stats_for(played), client,
+            });
+            return {room, next: played, rounds: await rounds_of(room, played, client)};
         });
-        res.send(view(room, next, handle));
+        res.send(view(room, next, handle, rounds));
         broadcast_game(id);
     });
 }
@@ -269,7 +346,7 @@ async function expire_turn(room_id, now = new Date()) {
             const next = follow_presence(room, stamp_turn(state, mark_timed_out(state, apply_move(state, player, move)), now), now);
             await db_game.record_move({
                 room_id, previous: state, next, handle: player, move,
-                turn_deadline: turn_deadline(room, next), timed_out: true, client,
+                turn_deadline: turn_deadline(room, next), timed_out: true, stats: stats_for(next), client,
             });
             state = next;
         } while (state.winner === null && state.turn === game.turn && state.current === game.current);
@@ -341,6 +418,8 @@ module.exports = {
     play,
     exchange,
     pass,
+    next_round,
+    end_rounds,
     expire_turn,
     expire_overdue_turns,
     start_turn_timer,
