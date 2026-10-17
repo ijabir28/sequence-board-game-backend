@@ -21,11 +21,13 @@ browsers send `Origin` themselves. The session cookie is `sequence.session_token
 `Secure` over HTTPS). Only the endpoints the frontend uses are listed; the rest are Better Auth's defaults.
 
 ### `POST /api/auth/sign-up/email`
-Body `{username, name, email, password}`. Creates the account and signs it in.
-- Success: `200 {token, user}`.
+Body `{username, name, email, password}`. Creates the account and emails a link to confirm the address; it does not
+sign in. A sign-up with an email that already has an account answers the same and creates nothing (the address's
+owner is emailed instead), so nobody can find out which emails are registered.
+- Success: `200 {token: null, user}`.
 - `400 USERNAME_TOO_SHORT`, `USERNAME_TOO_LONG`, `INVALID_USERNAME` (3–20 of `a-z 0-9 _`), `400 USERNAME_IS_ALREADY_TAKEN`.
 - `400 INVALID_NAME` (1–10 characters after trimming; accounts made before this limit keep longer names).
-- `400 VALIDATION_ERROR` for a malformed email, `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`.
+- `400 VALIDATION_ERROR` for a malformed email.
 - `400 PASSWORD_TOO_SHORT` / `PASSWORD_TOO_LONG` (8–200 characters).
 - `429 TOO_MANY_ATTEMPTS` after 20 sign-ups from one IP within an hour.
 
@@ -33,10 +35,28 @@ Body `{username, name, email, password}`. Creates the account and signs it in.
 Body `{username, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
 - Success: `200 {token, user}`, sets the session cookie (a new session on every sign-in).
 - `401 INVALID_USERNAME_OR_PASSWORD` for a wrong password or an unknown handle (the two are indistinguishable).
+- `403 EMAIL_NOT_VERIFIED` for a right password on an account whose email isn't confirmed yet. A new confirmation link
+  is emailed (at most once a minute) and `message` names the masked address. Accounts made before emails were asked
+  for have none to confirm and sign in as before.
 - `429 TOO_MANY_ATTEMPTS` after 10 failed sign-ins from one IP within 15 minutes. Successful sign-ins don't count.
 
 ### `POST /api/auth/sign-out`
 Deletes the session row and clears the cookie. `200 {success: true}`.
+
+### Email confirmation
+The emailed link is `GET /api/auth/verify-email?token=…&callbackURL=%2Femail-verified` (valid 24 hours). It confirms
+the address, signs in and redirects to the frontend's `/email-verified`, or to `/email-verified?error=INVALID_TOKEN`
+(or `TOKEN_EXPIRED`). `POST /api/auth/send-verification-email {email}` emails a new link; `200` whether or not the
+address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 minutes.
+
+### Password reset
+- `POST /api/auth/request-password-reset {email, redirectTo: "/reset-password"}`: emails a link if an account uses
+  the address; `200` either way. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 minutes.
+- The link, `GET /api/auth/reset-password/:token?callbackURL=%2Freset-password` (valid once, for an hour), redirects
+  to the frontend's `/reset-password?token=…`, or `/reset-password?error=INVALID_TOKEN`.
+- `POST /api/auth/reset-password {token, newPassword}`: `200`, then every session of the account is deleted, the email
+  counts as confirmed (the link went there) and a "password changed" email goes out. `400 INVALID_TOKEN` for an
+  expired or used token, `400 PASSWORD_TOO_SHORT` / `PASSWORD_TOO_LONG`.
 
 ## User
 

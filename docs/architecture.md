@@ -52,7 +52,9 @@ been applied.
 ```
 bin/www               Applies migrations, then HTTP server, attaches Socket.IO, listens on PORT
 app.js                Express app: morgan, /api/auth, JSON/urlencoded body, static public/, /health, routers
-auth.js               Better Auth: accounts, sessions, the secret; load_session puts req.user / req.handle
+auth.js               Better Auth: accounts, sessions, email confirmation, password reset, the secret;
+                      load_session puts req.user / req.handle
+mailer.js             Sends account emails over SMTP (SMTP_URL), or logs them when it isn't set
 docker-compose.yml    Development environment: Postgres, backend, frontend
 socket.js             Single Socket.IO server + broadcast({event, data}) to every connected socket; join_game/leave_game
 
@@ -80,6 +82,7 @@ database/
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
 entity/               Domain layer (tested)
   user.js             Handle and display name rules, scrypt password hashing
+  emails.js           Account emails: confirmation, password reset, password changed, already registered
   room.js             Room names, slug codes and settings (defaults and parsing), game modes
   hints.js            Training hints: suggest_move() for the current player
   sequence_game.js    Full rules for table games: dealing, turns, jacks, dead cards, sequences, win. Wired to HTTP
@@ -172,10 +175,19 @@ records its salt and cost parameters, so the cost can be raised without breaking
 sign-up are rate limited per client IP in memory (`routes/auth.js`, see [api.md](api.md#accounts-better-auth));
 limits reset when the server restarts. Better Auth adds its own limits in production.
 
+New accounts confirm their email before they can sign in: a hook on every new session (`require_verified_email`)
+refuses accounts with an unconfirmed address and emails a fresh link. Accounts made before emails were asked for have a
+`<handle>@no-email.invalid` placeholder, which can't receive mail, so they are let in and never emailed. Better Auth's
+own `requireEmailVerification` can't make that exception. Password reset links work once, for an hour; a reset signs
+out every device. Emails go out in the background, so the answer (and its timing) never shows whether an address has
+an account. Without `SMTP_URL` they are printed to the server log, which is how to get the links in development.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | the compose database on localhost | PostgreSQL connection |
 | `SESSION_SECRET` | a fixed development value | Signs session cookies, emailed links and socket tokens (`BETTER_AUTH_SECRET` also works). **Required** when `NODE_ENV=production` |
 | `BETTER_AUTH_URL` | `http://localhost:5173` | The address players open: emailed links point here, other origins are refused. **Required** when `NODE_ENV=production` |
+| `SMTP_URL` | none: emails are logged | SMTP server for account emails, e.g. `smtps://user:password@smtp.example.com:465` |
+| `MAIL_FROM` | `Sequence <no-reply@sequence.invalid>` | Sender of account emails; use an address the SMTP service lets you send from |
 | `TRUST_PROXY` | off | Express `trust proxy` (e.g. `1`), so rate limits see client IPs behind a reverse proxy |
 | `PORT` | `3000` | HTTP port |
