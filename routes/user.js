@@ -14,5 +14,6 @@ router.get('/current-game', user.current_game);
 router.put('/avatar', body_parser.raw({type: ACCEPTED_TYPES, limit: AVATAR_MAX_BYTES + 1024}), user.upload_avatar);
 router.delete('/avatar', user.remove_avatar);
 router.get('/avatar/:id', user.avatar);
+router.put('/card-deck', user.set_card_deck);
 
 module.exports = router;
