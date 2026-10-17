@@ -1,9 +1,7 @@
 // HTTP tests for rooms and table games. Need PostgreSQL, see database/test_database.js.
 const request = require('supertest');
 const {has_database, use_test_schema} = require('../database/test_database');
-// The outbox of the app this spec loads. Required here, once: after the restart test resets the module registry, a
-// fresh require would return a new, empty outbox while the app in use keeps sending to this one.
-const {outbox} = require('../mailer');
+const {verified_account} = require('./test_accounts');
 
 const describe_with_database = has_database ? describe : describe.skip;
 
@@ -23,13 +21,7 @@ describe_with_database('rooms and table games', function () {
     }
 
     async function sign_up(handle) {
-        agents[handle] = request.agent(app);
-        await agents[handle].post('/api/auth/sign-up/email')
-            .send({username: handle, name: `P ${handle}`, email: `${handle}@example.test`, password: 'long enough'}).expect(200);
-        // Confirm the email with the emailed link, which signs the agent in.
-        const mail = outbox.filter((m) => m.to === `${handle}@example.test`).pop();
-        const link = new URL(mail.text.match(/https?:\/\/\S+/)[0]);
-        await agents[handle].get(link.pathname + link.search).expect(302);
+        agents[handle] = await verified_account(request, app, {username: handle, name: `P ${handle}`, email: `${handle}@example.test`});
     }
 
     async function open_room(handle, teams = 2, players = 1, settings = {}) {

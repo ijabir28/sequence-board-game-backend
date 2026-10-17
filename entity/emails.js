@@ -73,4 +73,18 @@ function existing_account({name, handle, sign_in_url}) {
     }));
 }
 
-module.exports = {escape_html, verify_email, reset_password, password_changed, existing_account};
+// Sent to the current address when the player asks to move their account to another one.
+function approve_email_change({name, new_email, url, hours}) {
+    return Object.assign({subject: 'Approve the new email for your Sequence account'}, layout({
+        name,
+        paragraphs: [
+            `Someone signed in to your Sequence account asked to change its email to ${new_email}. If that was you, ` +
+            'approve it here; we will then send a link to the new address to confirm it.',
+        ],
+        action: {label: 'Approve the change', url},
+        footer: `The link works for ${hours} hours. If it wasn't you, ignore this email and change your password: ` +
+            'your email stays as it is.',
+    }));
+}
+
+module.exports = {escape_html, verify_email, reset_password, password_changed, existing_account, approve_email_change};
