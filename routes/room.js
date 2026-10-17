@@ -16,5 +16,6 @@ room_router.post('/:id/game/exchange', room_game.exchange);
 room_router.post('/:id/game/pass', room_game.pass);
 room_router.post('/:id/rounds/next', room_game.next_round);
 room_router.post('/:id/rounds/end', room_game.end_rounds);
+room_router.get('/:id/rounds/:round', room_game.round_detail);
 
 module.exports = {room_router};
