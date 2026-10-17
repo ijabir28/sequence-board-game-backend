@@ -22,6 +22,9 @@ function limit({limit, minutes, skipSuccessfulRequests = false}) {
 // Only failed sign-ins count, so guessing passwords is slow but normal use is never blocked.
 router.post('/sign-in/username', limit({limit: 10, minutes: 15, skipSuccessfulRequests: true}));
 router.post('/sign-up/email', limit({limit: 20, minutes: 60}));
+// These send email, so they are kept to a trickle: enough to ask again, not enough to flood someone's inbox.
+router.post('/request-password-reset', limit({limit: 5, minutes: 15}));
+router.post('/send-verification-email', limit({limit: 5, minutes: 15}));
 
 router.all('*', toNodeHandler(auth));
 

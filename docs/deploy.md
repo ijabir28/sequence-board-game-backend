@@ -49,9 +49,24 @@ when `NODE_ENV=production`, which the image sets).
 | `DATABASE_URL_UNPOOLED` | you (Neon) | Direct connection, for migrations |
 | `SESSION_SECRET` | Render (generated) | Signs session cookies, emailed links and socket presence tokens; changing it signs everyone out |
 | `BETTER_AUTH_URL` | render.yaml | The address players open; emailed links point here and other origins are refused. Update it if the service's URL changes |
+| `SMTP_URL`, `MAIL_FROM` | you (Render dashboard) | Where account emails go out, see [Email](#email). Without them, emails only reach the service's log |
 | `TRUST_PROXY` | render.yaml | Hops of reverse proxy in front, so the sign-in rate limit sees the client's IP |
 | `NODE_ENV`, `FRONTEND_DIST` | Dockerfile | Production mode; where the built frontend is |
 | `PORT` | Render | Port to listen on |
+
+## Email
+
+Confirming an email and resetting a password need real email. Any SMTP service works; free ones without a card:
+
+- **Gmail**: turn on 2-Step Verification, create an *App password*, then
+  `SMTP_URL=smtps://you%40gmail.com:<app password>@smtp.gmail.com:465` and `MAIL_FROM=Sequence <you@gmail.com>`.
+  About 500 emails a day; fine for friends and family.
+- **Brevo** (300 emails a day): add and verify a sender, create an SMTP key, then
+  `SMTP_URL=smtp://<login>:<smtp key>@smtp-relay.brevo.com:587` and `MAIL_FROM` set to that sender.
+
+Set both in the Render dashboard (*Environment*), not in render.yaml: the URL holds a password. Characters such as
+`@` in the user or password must be percent-encoded (`%40`). Until they are set, new accounts can't confirm their email
+except by copying the link from the service's log.
 
 ## Running locally against Neon
 
