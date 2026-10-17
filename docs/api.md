@@ -33,7 +33,10 @@ owner is emailed instead), so nobody can find out which emails are registered.
 
 ### `POST /api/auth/sign-in/username`
 Body `{username, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
-- Success: `200 {token, user}`, sets the session cookie (a new session on every sign-in).
+- Success: `200 {token, user}`, sets the session cookie (a new session on every sign-in). An account is signed in on
+  one device at a time: every other session of the account is deleted, so other devices get `401` on their next
+  request, and `signed_in_elsewhere {handle}` is broadcast (see [Socket.IO](#socketio)). Confirming an email signs in
+  too, with the same effect.
 - `401 INVALID_USERNAME_OR_PASSWORD` for a wrong password or an unknown handle (the two are indistinguishable).
 - `403 EMAIL_NOT_VERIFIED` for a right password on an account whose email isn't confirmed yet. A new confirmation link
   is emailed (at most once a minute) and `message` names the masked address. Accounts made before emails were asked
@@ -92,8 +95,8 @@ All need the session cookie and a trusted `Origin`.
   to `callbackURL`. An address that already has an account answers the same and changes nothing.
 - `POST /api/auth/change-password {currentPassword, newPassword, revokeOtherSessions: true}`: `200`, every other
   session is deleted and a "password changed" email goes out. `400 INVALID_PASSWORD` for a wrong current password.
-- `GET /api/auth/list-sessions`: the account's sessions (`createdAt`, `updatedAt`, `userAgent`, `token`, …).
-  `POST /api/auth/revoke-other-sessions {}` deletes all but this one.
+- `GET /api/auth/list-sessions`: the account's sessions (`createdAt`, `updatedAt`, `userAgent`, `token`, …). With one
+  device at a time that is just this one. `POST /api/auth/revoke-other-sessions {}` still deletes all but this one.
 
 ### `GET /user/rooms` (auth)
 One page of the tables you created or sat at, newest first. Query `page` (from 1, default 1) and `per_page`
@@ -333,6 +336,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `room_updated` | Room (see above) | After every successful join or game start, sent to **every** connected socket |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
+| `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
 
 | Event (client → server) | Payload | Meaning |
 |---|---|---|
