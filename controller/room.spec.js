@@ -23,6 +23,10 @@ describe_with_database('rooms and table games', function () {
         agents[handle] = request.agent(app);
         await agents[handle].post('/api/auth/sign-up/email')
             .send({username: handle, name: `P ${handle}`, email: `${handle}@example.test`, password: 'long enough'}).expect(200);
+        // Confirm the email with the emailed link, which signs the agent in.
+        const mail = require('../mailer').outbox.filter((m) => m.to === `${handle}@example.test`).pop();
+        const link = new URL(mail.text.match(/https?:\/\/\S+/)[0]);
+        await agents[handle].get(link.pathname + link.search).expect(302);
     }
 
     async function open_room(handle, teams = 2, players = 1, settings = {}) {
