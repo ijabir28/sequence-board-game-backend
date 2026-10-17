@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node ./bin/www",
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "dev": "nodemon ./bin/www",
     "db:migrate": "node database/migrate.js",
     "db:seed": "node database/seed.js",
@@ -12,20 +12,23 @@
     "debug_2": "node console_controller_2/index.js"
   },
   "dependencies": {
-    "connect-pg-simple": "10.0.0",
+    "better-auth": "1.7.7",
+    "body-parser": "1.18.3",
     "cookie-parser": "~1.4.3",
     "debug": "~2.6.9",
     "express": "~4.16.0",
     "express-rate-limit": "8.7.1",
-    "express-session": "^1.17.1",
     "http-errors": "~1.6.2",
     "inquirer": "^7.1.0",
     "morgan": "~1.9.0",
+    "nodemailer": "10.0.13",
     "pg": "8.23.1",
-    "socket.io": "latest",
+    "socket.io": "2.3.0",
     "vue": "^2.6.11"
   },
   "devDependencies": {
+    "@neon/config": "^1.9.2",
+    "@neon/env": "^1.6.3",
     "colors": "^1.4.0",
     "jest": "30.5.2",
     "nodemon": "3.1.14",

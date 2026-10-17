@@ -58,8 +58,10 @@ module.exports = {migrate};
 
 // `npm run db:migrate`
 if (require.main === module) {
-    const {pool} = require('./pool');
-    migrate({pool})
+    const {pool, with_direct_pool} = require('./pool');
+    with_direct_pool(function (direct) {
+        return migrate({pool: direct});
+    })
         .then(function (applied) {
             if (applied.length === 0) console.log('Database is up to date');
         })

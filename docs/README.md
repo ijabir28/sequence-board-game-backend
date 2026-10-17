@@ -10,10 +10,11 @@ the project without reading the source.
 | [api.md](api.md) | HTTP endpoints and Socket.IO events (the frontend contract) |
 | [game-domain.md](game-domain.md) | Cards, board layout, rules the code enforces and rules it doesn't |
 | [known-issues.md](known-issues.md) | Bugs and gaps confirmed by running the server |
+| [deploy.md](deploy.md) | Free production deploy: Render + Neon, one origin for frontend and backend |
 
 ## In one paragraph
 
-Express 4 serves a small REST API plus static files from `public/`, with cookie sessions (`express-session`)
+Express 4 serves a small REST API plus static files from `public/`, with accounts and cookie sessions from Better Auth
 and a Socket.IO server attached to the same HTTP server. Accounts, sessions, rooms, games and every move are
 stored in PostgreSQL. Games are played at a room's table (`entity/sequence_game.js`: dealing, turns, jacks,
 dead cards, sequences, winning). An older global test game (`controller/game.js`) and a terminal-only domain layer
@@ -24,7 +25,7 @@ dead cards, sequences, winning). An older global test game (`controller/game.js`
 
 | Area | State |
 |---|---|
-| Sign up / sign in / sign out | Works; accounts and sessions in PostgreSQL, scrypt hashes, rate limited |
+| Sign up / sign in / sign out | Works; Better Auth with accounts and sessions in PostgreSQL, scrypt hashes, rate limited |
 | Create/join room, live room updates | Works; named tables with slug codes and host-set options |
 | Room options | Standard or training mode (hints), move history, legal-move highlights, dead-card auto-draw |
 | Start a game from a room, play it | Works (`/room/:id/start` by the host, `/room/:id/game/*`) |
@@ -32,3 +33,4 @@ dead cards, sequences, winning). An older global test game (`controller/game.js`
 | Persistence | Accounts, sessions, rooms, seats, settings, games and turn history (only the legacy dev game is in memory) |
 | CORS | Not configured |
 | Local environment | `docker compose up` (Postgres, backend, frontend), see [architecture.md](architecture.md#run) |
+| Production | Render + Neon, frontend served by the backend, see [deploy.md](deploy.md) |

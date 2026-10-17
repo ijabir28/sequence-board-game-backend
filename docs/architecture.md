@@ -2,7 +2,7 @@
 
 ## Stack
 
-Node.js, Express `~4.16`, `express-session` (stored in PostgreSQL by `connect-pg-simple`), `express-rate-limit`, `socket.io` (declared as `latest`, locked
+Node.js, Express `~4.16`, Better Auth 1.7 (accounts and sessions in PostgreSQL), `express-rate-limit`, `socket.io` (declared as `latest`, locked
 to 2.3.0 by `package-lock.json`), PostgreSQL 16 through `pg` (plain SQL, no ORM), Jest for tests. CommonJS
 modules, no build step, no TypeScript.
 
@@ -51,32 +51,40 @@ been applied.
 
 ```
 bin/www               Applies migrations, then HTTP server, attaches Socket.IO, listens on PORT
-app.js                Express app: morgan, JSON/urlencoded body, static public/, session, /health, routers
+app.js                Express app: morgan, /api/auth, JSON/urlencoded body, static public/, /health, routers
+auth.js               Better Auth: accounts, sessions, email confirmation, password reset, the secret;
+                      load_session puts req.user / req.handle
+mailer.js             Sends account emails via Brevo's API (BREVO_API_KEY) or SMTP (SMTP_URL), else logs them
 docker-compose.yml    Development environment: Postgres, backend, frontend
-socket.js             Single Socket.IO server + broadcast({event, data}) to every connected socket
+socket.js             Single Socket.IO server + broadcast({event, data}) to every connected socket; join_game/leave_game
 
-routes/               Thin routers: user, room, game, board
+routes/               Thin routers: auth (Better Auth + rate limits), user, room, game, board
 controller/
-  user.js             signup, signin, signout, profile (JSON errors)
+  user.js             profile and stats, avatars, the user's rooms and current game (JSON errors)
   room.js             create / get / join room, change its settings (host only), broadcasts room_updated
-  room_game.js        start a table's game, view it, play / exchange / pass; broadcasts game_updated
+  room_game.js        start a table's game, view it, play / exchange / pass; broadcasts game_updated; turn timer,
+                      pauses the turn of a player who is away from the table
+  presence.js         In memory: which seated players have their table's game open (signed socket tokens)
   board.js            serves data/board_deck.json (module singleton, also used as live board state)
   game.js             LEGACY global game: 4 hard-coded players, deal on module load, play endpoint
   index.js            Dead code (unattached socket.io instance, unused inquirer controller)
 database/
   pool.js             PostgreSQL connection pool (DATABASE_URL) and ping() for /health
   migrate.js          SQL migration runner (also `npm run db:migrate`), tested in migrate.spec.js
-  migrations/         Numbered .sql files: 0001 users, 0002 session, 0003 rooms + room_seats, 0004 games + turns,
+  migrations/         Numbered .sql files (0012 user_avatars): 0001 users, 0002 session, 0003 rooms + room_seats, 0004 games + turns,
                       0005 room names, slug codes and settings, 0006 game mode,
                       0007 highlights and history off by default, 0008 turn timer,
-                      0009 turn deadlines
-  users.js            Accounts in the users table; only find_credentials() reads password_hash
+                      0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables
+  users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
   rooms.js            Rooms and seats; join() takes a seat under a room lock; list_for_user() for history
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
 entity/               Domain layer (tested)
-  user.js             Sign-up rules, scrypt password hashing
+  user.js             Handle and display name rules, scrypt password hashing
+  emails.js           Account emails: confirmation, password reset, password changed, already registered,
+                      approving a new email
+  avatar.js           Which avatar uploads are accepted (PNG, JPEG, WebP by their bytes, 256 KB)
   room.js             Room names, slug codes and settings (defaults and parsing), game modes
   hints.js            Training hints: suggest_move() for the current player
   sequence_game.js    Full rules for table games: dealing, turns, jacks, dead cards, sequences, win. Wired to HTTP
@@ -111,7 +119,8 @@ The `use_case` loop talks to the outside world through a controller object:
 ## State and lifetime
 
 Accounts, sessions, rooms, seats, table games and their turns are stored in PostgreSQL and survive restarts.
-Only the legacy developer game is still in memory and lost on restart (dealt once when
+Who is at each table (`controller/presence.js`) is also in memory: after a restart every player is away, and
+their turn waits, until their game page reconnects. Only the legacy developer game is still in memory and lost on restart (dealt once when
 `controller/game.js` is first required, at server start), and the board. There is one global HTTP game for
 the whole server, not one per room.
 
@@ -149,20 +158,44 @@ After a restart, `GET /user/rooms` lists a player's tables and `GET /room/:id/ga
 The game state also carries its own `log`, which the GameView shows; `turns` is the queryable history of the same
 moves, keyed to user ids rather than display names.
 
-## Sessions
+## Accounts and sessions
 
-Cookie `connect.sid`: HttpOnly, `SameSite=Lax`, expires after 7 days without a request (rolling). The session
-row lives in the `session` table, holds only `handle`, and is deleted by `POST /user/signout`. There is no
-CORS middleware, so a frontend on another origin needs a same-origin proxy (the frontend's Vite dev server is one).
+[Better Auth](https://better-auth.com) (`auth.js`) runs accounts and sessions in our PostgreSQL, with its tables
+mapped onto ours: `users` (its `user`; the handle is the username plugin's `username`, and ids stay the BIGINT that
+rooms reference), `auth_accounts` (the password hash), `auth_sessions` and `auth_verifications`. Migration 0011
+created them from the earlier `users` and `session` tables, keeping every account and password.
 
-Passwords are hashed with scrypt (`entity/user.js`). The hash string records its salt and cost parameters,
-so the cost can be raised without breaking existing accounts. Sign-in and sign-up are rate limited per client
-IP in memory (see [api.md](api.md#user)); limits reset when the server restarts.
+Cookie `sequence.session_token`: HttpOnly, `SameSite=Lax`, `Secure` when `BETTER_AUTH_URL` is HTTPS. It holds a
+signed token for a row in `auth_sessions`, which expires after 7 days without use (each day of use extends it) and
+is deleted by sign-out. `load_session` (in `auth.js`) looks the session up for `/user`, `/room`, `/game` and `/board`
+and passes on the refreshed cookie when Better Auth extends it. There is no CORS middleware, and Better Auth refuses
+`POST`s from origins other than `BETTER_AUTH_URL`, so a frontend on another origin needs a same-origin proxy (the
+frontend's Vite dev server is one).
+
+Passwords are hashed with scrypt (`entity/user.js`), which Better Auth is given in place of its own. The hash string
+records its salt and cost parameters, so the cost can be raised without breaking existing accounts. Sign-in and
+sign-up are rate limited per client IP in memory (`routes/auth.js`, see [api.md](api.md#accounts-better-auth));
+limits reset when the server restarts. Better Auth adds its own limits in production.
+
+New accounts confirm their email before they can sign in: a hook on every new session (`require_verified_email`)
+refuses accounts with an unconfirmed address and emails a fresh link. Accounts made before emails were asked for have a
+`<handle>@no-email.invalid` placeholder, which can't receive mail, so they are let in and never emailed. Better Auth's
+own `requireEmailVerification` can't make that exception. Password reset links work once, for an hour; a reset signs
+out every device. Emails go out in the background, so the answer (and its timing) never shows whether an address has
+an account. Without `BREVO_API_KEY` or `SMTP_URL` they are printed to the server log, which is how to get the links in development.
+
+Players manage their account from the frontend's profile page: display name, email and password through Better Auth,
+avatars through `/user/avatar`. Avatars are stored in PostgreSQL (`user_avatars`, a few kilobytes each after the
+frontend shrinks them), so there is no file storage to run; `users.image` holds the versioned URL that serves the
+current one. Handles never change, since games and socket tokens refer to players by handle.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | the compose database on localhost | PostgreSQL connection |
-| `SESSION_SECRET` | a fixed development value | Signs the session cookie. **Required** when `NODE_ENV=production` |
-| `COOKIE_SECURE` | off | `true` adds the `Secure` flag; set it when serving over HTTPS |
+| `SESSION_SECRET` | a fixed development value | Signs session cookies, emailed links and socket tokens (`BETTER_AUTH_SECRET` also works). **Required** when `NODE_ENV=production` |
+| `BETTER_AUTH_URL` | `http://localhost:5173` | The address players open: emailed links point here, other origins are refused. **Required** when `NODE_ENV=production` |
+| `BREVO_API_KEY` | none | Sends account emails through Brevo's API over HTTPS (for hosts that block SMTP, like Render's free tier) |
+| `SMTP_URL` | none: emails are logged | SMTP server for account emails when there is no `BREVO_API_KEY`, e.g. `smtps://user:password@smtp.example.com:465` |
+| `MAIL_FROM` | `Sequence <no-reply@sequence.invalid>` | Sender of account emails; use an address the SMTP service lets you send from |
 | `TRUST_PROXY` | off | Express `trust proxy` (e.g. `1`), so rate limits see client IPs behind a reverse proxy |
 | `PORT` | `3000` | HTTP port |

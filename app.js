@@ -1,11 +1,11 @@
 const express = require('express');
 const path = require('path');
 const logger = require('morgan');
-const session = require('express-session');
-const PgSessionStore = require('connect-pg-simple')(session);
-const {pool, ping} = require('./database/pool');
+const {ping} = require('./database/pool');
+const {load_session} = require('./auth');
 
 
+const  auth_router = require("./routes/auth");
 const  user_router = require("./routes/user");
 const  {room_router} = require("./routes/room");
 const  {game_router} = require("./routes/game");
@@ -23,25 +23,18 @@ if (process.env.TRUST_PROXY) {
 if (process.env.NODE_ENV !== 'test') {
     app.use(logger('dev'));
 }
+// Better Auth parses its own request bodies, so it comes before the body parsers.
+app.use('/api/auth', auth_router);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+// In production the built React frontend (FRONTEND_DIST, see Dockerfile) is served from here too, so the page,
+// the API and the socket share one origin and the session cookie needs no CORS. It comes before `public` so
+// its index.html wins over the legacy page.
+const frontend_dist = process.env.FRONTEND_DIST && path.resolve(process.env.FRONTEND_DIST);
+if (frontend_dist) {
+    app.use(express.static(frontend_dist));
+}
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(session({
-    // Sessions live in PostgreSQL, so a restart doesn't sign everyone out.
-    store: new PgSessionStore({pool, tableName: 'session'}),
-    secret: session_secret(),
-    resave: false,
-    saveUninitialized: false,
-    // Each request pushes the expiry back, so only a week of inactivity signs a user out.
-    rolling: true,
-    cookie: {
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        sameSite: 'lax',
-        // Set COOKIE_SECURE=true when the app is served over HTTPS.
-        secure: process.env.COOKIE_SECURE === 'true',
-    },
-}));
 
 app.get('/health', function (req, res) {
     ping()
@@ -53,19 +46,21 @@ app.get('/health', function (req, res) {
         });
 });
 
+// Who is signed in, as req.user and req.handle, for the game's own endpoints.
+app.use(['/user', '/room', '/game', '/board'], load_session);
 app.use('/user', user_router);
 app.use('/room', room_router);
 app.use('/game', game_router);
 app.use('/board', board_router);
 
-function session_secret() {
-    if (process.env.SESSION_SECRET) {
-        return process.env.SESSION_SECRET;
-    }
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('SESSION_SECRET must be set in production.');
-    }
-    return 'development-only-session-secret';
+// Any other page (/lobby, /table/:id, ...) is a frontend route: hand back the app and let its router take over.
+if (frontend_dist) {
+    app.get('*', function (req, res, next) {
+        if (!req.accepts('html')) {
+            return next();
+        }
+        res.sendFile(path.join(frontend_dist, 'index.html'));
+    });
 }
 
 module.exports = app;

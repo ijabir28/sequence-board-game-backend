@@ -1,7 +1,7 @@
 # API contract
 
 Base URL `http://localhost:3000`. Request bodies are JSON (`Content-Type: application/json`); urlencoded also
-works. Auth means "uses the session cookie set by `/user/signin`". There is no global error handler, so thrown
+works. Auth means "uses the session cookie set by `/api/auth/sign-in/username`". There is no global error handler, so thrown
 errors come back as Express's default **HTML** 500 page, not JSON. Behaviour below was confirmed against a
 running server.
 
@@ -11,30 +11,92 @@ running server.
 `200 {status: 'ok', database: 'up'}` when PostgreSQL answers, `503 {status: 'error', database: 'down'}` when it
 doesn't. Used by the backend's Docker healthcheck.
 
-## User
+## Accounts (Better Auth)
 
-Errors are JSON `{error: CODE, message}`; `message` is readable by players. Handles are case-insensitive:
-they are trimmed and lower-cased before use, and responses always carry the stored lower-case form.
+Signing up, in and out is [Better Auth](https://better-auth.com) 1.7, mounted at `/api/auth` (`auth.js`). Its
+errors are JSON `{code, message}`; its messages are terse, so the frontend words them itself. Handles are
+case-insensitive: Better Auth's `username` is the handle, trimmed and lower-cased before use. Every `POST` must come
+from a trusted origin (`BETTER_AUTH_URL`, plus `http://localhost:3000` in development) or it is `403 INVALID_ORIGIN`;
+browsers send `Origin` themselves. The session cookie is `sequence.session_token` (HttpOnly, `SameSite=Lax`,
+`Secure` over HTTPS). Only the endpoints the frontend uses are listed; the rest are Better Auth's defaults.
 
-### `POST /user/signup`
-Body `{handle, name, password}`. Creates the account and signs it in (sets cookie `connect.sid`).
-- Success: `201 {handle, name}`.
-- `400 INVALID_HANDLE` (3–20 of `a-z 0-9 _`), `400 INVALID_NAME` (1–50 characters after trimming),
-  `400 WEAK_PASSWORD` (8–200 characters).
-- `409 HANDLE_TAKEN`.
+### `POST /api/auth/sign-up/email`
+Body `{username, name, email, password}`. Creates the account and emails a link to confirm the address; it does not
+sign in. A sign-up with an email that already has an account answers the same and creates nothing (the address's
+owner is emailed instead), so nobody can find out which emails are registered.
+- Success: `200 {token: null, user}`.
+- `400 USERNAME_TOO_SHORT`, `USERNAME_TOO_LONG`, `INVALID_USERNAME` (3–20 of `a-z 0-9 _`), `400 USERNAME_IS_ALREADY_TAKEN`.
+- `400 INVALID_NAME` (1–10 characters after trimming; accounts made before this limit keep longer names).
+- `400 VALIDATION_ERROR` for a malformed email.
+- `400 PASSWORD_TOO_SHORT` / `PASSWORD_TOO_LONG` (8–200 characters).
 - `429 TOO_MANY_ATTEMPTS` after 20 sign-ups from one IP within an hour.
 
-### `POST /user/signin`
-Body `{handle, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
-- Success: `200 {handle, name}`, sets cookie `connect.sid` (a new session id on every sign-in).
-- `401 INVALID_CREDENTIALS` for a wrong password or an unknown handle (the two are indistinguishable).
+### `POST /api/auth/sign-in/username`
+Body `{username, password}`. Development accounts (created by `npm run db:seed`): `jabir` / `1`, `sakib` / `123`.
+- Success: `200 {token, user}`, sets the session cookie (a new session on every sign-in). An account is signed in on
+  one device at a time: every other session of the account is deleted, so other devices get `401` on their next
+  request, and `signed_in_elsewhere {handle}` is broadcast (see [Socket.IO](#socketio)). Confirming an email signs in
+  too, with the same effect.
+- `401 INVALID_USERNAME_OR_PASSWORD` for a wrong password or an unknown handle (the two are indistinguishable).
+- `403 EMAIL_NOT_VERIFIED` for a right password on an account whose email isn't confirmed yet. A new confirmation link
+  is emailed (at most once a minute) and `message` names the masked address. Accounts made before emails were asked
+  for have none to confirm and sign in as before.
 - `429 TOO_MANY_ATTEMPTS` after 10 failed sign-ins from one IP within 15 minutes. Successful sign-ins don't count.
 
-### `POST /user/signout`
-Ends the session on the server and clears the cookie. Always `204`, with or without a session.
+### `POST /api/auth/sign-out`
+Deletes the session row and clears the cookie. `200 {success: true}`.
+
+### Email confirmation
+The emailed link is `GET /api/auth/verify-email?token=…&callbackURL=%2Femail-verified` (valid 24 hours). It confirms
+the address, signs in and redirects to the frontend's `/email-verified`, or to `/email-verified?error=INVALID_TOKEN`
+(or `TOKEN_EXPIRED`). `POST /api/auth/send-verification-email {email}` emails a new link; `200` whether or not the
+address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 minutes.
+
+### Password reset
+- `POST /api/auth/request-password-reset {email, redirectTo: "/reset-password"}`: emails a link if an account uses
+  the address; `200` either way. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 minutes.
+- The link, `GET /api/auth/reset-password/:token?callbackURL=%2Freset-password` (valid once, for an hour), redirects
+  to the frontend's `/reset-password?token=…`, or `/reset-password?error=INVALID_TOKEN`.
+- `POST /api/auth/reset-password {token, newPassword}`: `200`, then every session of the account is deleted, the email
+  counts as confirmed (the link went there) and a "password changed" email goes out. `400 INVALID_TOKEN` for an
+  expired or used token, `400 PASSWORD_TOO_SHORT` / `PASSWORD_TOO_LONG`.
+
+## User
+
+Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name}`, or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?".
+`200 {handle, name, email, email_verified, image, created_at, stats: {played, won, playing}}`, or
+`401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before emails
+were asked for; `image` is the avatar's URL or `null`. `stats` counts the table games the player has a seat in:
+finished (`played`), won by their team (`won`) and in progress (`playing`).
+
+### `PUT /user/avatar` (auth)
+The picture as the raw body, `Content-Type` `image/png`, `image/jpeg` or `image/webp`, at most 256 KB (the frontend
+crops and shrinks it to 256×256 first). The type is read from the bytes. `200 {image}`, the URL that now serves it,
+also in `users.image`. `415 UNSUPPORTED_MEDIA_TYPE` for another content type (SVG included), `400 INVALID_IMAGE` when
+the bytes aren't one of those formats, `413 IMAGE_TOO_LARGE`.
+
+### `DELETE /user/avatar` (auth)
+`204`; `image` goes back to `null`.
+
+### `GET /user/avatar/:id`
+Anyone's avatar, as its image, or `404 NOT_FOUND`. The URL carries a version (`?v=…`) that changes with every upload,
+so the response is cached for a year. It is served with `nosniff` and a sandboxing Content-Security-Policy.
+
+### Profile changes (Better Auth)
+All need the session cookie and a trusted `Origin`.
+- `POST /api/auth/update-user {name}`: the display name, with the rule above (`400 INVALID_NAME`). The handle can't
+  change (`400 USERNAME_IS_IMMUTABLE`: games and socket tokens refer to players by it), and `image` can't be set here
+  (`400 IMAGE_READ_ONLY`).
+- `POST /api/auth/change-email {newEmail, callbackURL: "/profile"}`: `200` and nothing changes yet. If the current
+  address is confirmed, it is emailed a link to approve the move; then (or straight away for an account without an
+  email, or an unconfirmed one) the new address gets a link that confirms it and makes the change. Both links redirect
+  to `callbackURL`. An address that already has an account answers the same and changes nothing.
+- `POST /api/auth/change-password {currentPassword, newPassword, revokeOtherSessions: true}`: `200`, every other
+  session is deleted and a "password changed" email goes out. `400 INVALID_PASSWORD` for a wrong current password.
+- `GET /api/auth/list-sessions`: the account's sessions (`createdAt`, `updatedAt`, `userAgent`, `token`, …). With one
+  device at a time that is just this one. `POST /api/auth/revoke-other-sessions {}` still deletes all but this one.
 
 ### `GET /user/rooms` (auth)
 One page of the tables you created or sat at, newest first. Query `page` (from 1, default 1) and `per_page`
@@ -48,7 +110,7 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
   "id": "friday-night-k3m9", "name": "Friday Night", "created_at": "…", "administrator": "jabir",
   "administrator_name": "Jabir ibne kamal",
   "team_count": 2, "players_per_team": 1, "seats_taken": 2,
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90},
+  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "your_team": 0,                      // null when you only created the table
   "status": "playing",                 // open (no game yet) | playing | finished
   "started_at": "…", "last_move_at": "…", "finished_at": null, "winner_team": null,
@@ -67,8 +129,10 @@ Rooms, seats, games and every move are stored in PostgreSQL, so tables and games
 
 ### `POST /room/create` (auth)
 Body `{number_of_team, number_of_player_in_each_team, name?, mode?, history?, highlights?, auto_draw_dead?,
-turn_seconds?}`. Counts are numbers or numeric strings; `mode` is `"standard"` or `"training"`; `turn_seconds` is a
-whole number from 15 to 600; the other settings are booleans (or `"true"` / `"false"`).
+turn_seconds?, dead_cards?, exchanges_per_turn?}`. Counts are numbers or numeric strings; `mode` is `"standard"` or
+`"training"`; `turn_seconds` is a whole number from 15 to 600; `dead_cards` is `"manual"` or `"indicator"`;
+`exchanges_per_turn` is `null` or `"unlimited"`, or a whole number from 1 to 10; the other settings are booleans (or
+`"true"` / `"false"`).
 `200 {id}`. `id` is the table's code: a slug of its name plus a 4-character suffix, such as `"friday-night-k3m9"`.
 Without a name the table gets a generated one ("Lucky Otter"). The signed-in user becomes `administrator` (the host).
 Errors are JSON `{error, message}`: `401 NOT_SIGNED_IN`, `400 UNSUPPORTED_TABLE` for a table size the rules
@@ -83,12 +147,14 @@ Settings and their defaults:
 | `history` | `false` | Off: `GET /room/:id/turns` is `403 HISTORY_DISABLED` and the GameView's `log` keeps only the latest move |
 | `highlights` | `false` | Off: clients don't light up legal cells (the server only reports the setting) |
 | `turn_seconds` | `90` | Seconds each player has for a turn. Clients offer 30, 60, 90, 120 and 180, or any whole number from 15 to 600 |
-| `auto_draw_dead` | `false` | On: a dead card is exchanged automatically when its owner's turn starts (their one exchange for that turn), logged as `{kind: "exchange", auto: true, …}` |
+| `dead_cards` | `"manual"` | `"manual"`: nothing marks dead cards; players spot them and ask to exchange them, and the server refuses a card that isn't dead (`NOT_DEAD`). The GameView's `can_exchange` is then true whenever the current player has exchanges left, so it never gives a dead card away. `"indicator"`: clients mark dead cards in the hand, and `can_exchange` is true only when one is there |
+| `exchanges_per_turn` | `null` (unlimited) | How many dead cards a player may exchange in one turn: `null` for unlimited, or 1 to 10. Rooms created before this setting allow 1 |
+| `auto_draw_dead` | `false` | With `dead_cards: "indicator"` only. On: dead cards are exchanged automatically when their owner's turn starts (as many as `exchanges_per_turn` allows, counted as theirs), logged as `{kind: "exchange", auto: true, …}` |
 
 Room codes created before slugs are numeric strings (`"731791746123232"`) and still work.
 
 ### `PATCH /room/:id/settings` (auth, host)
-Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?}`; missing keys keep their value. The code never changes.
+Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead_cards?, exchanges_per_turn?}`; missing keys keep their value. The code never changes.
 `200` with the Room, and `room_updated` is broadcast. `401 NOT_SIGNED_IN`, `403 NOT_HOST`, `404 ROOM_NOT_FOUND`,
 `409 GAME_ALREADY_STARTED` (settings are fixed once the game starts), `400 INVALID_NAME | INVALID_SETTINGS`.
 
@@ -102,7 +168,7 @@ Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?}`; mi
   "administrator_name": "Jabir ibne kamal",  // the host's display name, for messages
   "id": "friday-night-k3m9",
   "name": "Friday Night",
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90},
+  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "created_at": "2026-10-15T05:48:22.696Z",
   "teams": [
     { "handle": "TEAM_1", "players": [ {"handle": "jabir", "name": "Jabir ibne kamal"}, null ] },
@@ -164,15 +230,20 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "viewer": "jabir",                  // null for a spectator
   "hand": ["4-Spade", "J-Club", …],
   "can_exchange": false, "can_pass": false,
+  "exchanges_left": null,             // current player only: dead card exchanges left this turn (null: unlimited)
   "deck_count": 90,
   "sequences": [{"team": 0, "cells": [{"row": 0, "column": 1}, …]}],
   "winner": null,
   "name": "Friday Night",            // the room's name
   "hint": null,                      // training games only, for the current player, see below
   "turn_started_at": "2026-10-15T06:55:15.349Z",   // when the current turn began (null for games stored before)
-  "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over)
+  "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over or while paused)
+  "turn_paused": false,              // the current player is away from the table, so their turn waits for them
+  "turn_time_left_ms": null,         // while paused: the time the current player will have left; else null
+  "away": ["sakib"],                 // seated players whose game page isn't open
+  "presence_token": "q9…",           // seated players only: send it with the socket's join_game (null for spectators)
   "server_time": "2026-10-15T06:55:21.002Z",       // the server's clock now, to run a turn timer despite clock skew
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90},
+  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "log": [{"kind": "place", "turn": 1, "player": "Jabir ibne kamal", "team": 0, "card": "4-Spade", "pos": {"row": 1, "column": 5}, "wild": false}, …]
 }
 ```
@@ -194,8 +265,16 @@ played, on a random legal cell (after exchanging a dead card if nothing else can
 done). It is recorded like any move, with `timed_out: true` on the turn and on the log entries it made, and
 `game_updated` is broadcast.
 
+Nobody plays for a player who isn't at the table. A seated player is at the table while their game page has a socket
+that sent `join_game` (see [Socket.IO](#socketio)); a dropped socket counts as gone after a 4 second grace period.
+When the current player is away, their turn is **paused**: `turn_deadline` is null, `turn_paused` is true and
+`turn_time_left_ms` says how long they'll have. The game waits on their turn until they're back, then the timer runs
+on from exactly where it stopped (the time spent away doesn't count, and there is no minimum). A turn that starts while its player is away (the first turn,
+before anyone has opened the game, for example) starts paused. Presence is kept in memory, so after a restart everyone
+is away until their page reconnects, which it does by itself. Every arrival and departure broadcasts `game_updated`.
+
 ### `POST /room/:id/game/play` (auth) — body `{hand_index, row, column}`
-### `POST /room/:id/game/exchange` (auth) — body `{hand_index}` (a dead card, once per turn, before playing)
+### `POST /room/:id/game/exchange` (auth) — body `{hand_index}` (a dead card, up to `exchanges_per_turn` per turn, before playing)
 ### `POST /room/:id/game/pass` (auth) — only when no card can be played or exchanged
 
 Each applies the move for the current player, draws a replacement card, and returns the new GameView. Every change
@@ -257,8 +336,14 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `room_updated` | Room (see above) | After every successful join or game start, sent to **every** connected socket |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
+| `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
 
-No client → server events are handled. For the legacy game there are no events, so clients must re-fetch
+| Event (client → server) | Payload | Meaning |
+|---|---|---|
+| `join_game` | `{room_id, handle, token}` | This socket has the table's game open, as `handle`. `token` is the `presence_token` from that player's GameView; anything else is ignored |
+| `leave_game` | `{room_id}` | This socket closed the game (left the game page) |
+
+No other client → server events are handled. For the legacy game there are no events, so clients must re-fetch
 `/board/deck` and `/game/hand_cards` themselves.
 
 ## Static assets

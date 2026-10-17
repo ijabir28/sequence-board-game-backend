@@ -11,7 +11,7 @@ const socket_server = require('../socket');
  * 200 {id}, where id is the table's slug. Errors are JSON {error, message}.
  */
 async function create(req, res) {
-    const administrator = await db_user.get_user({handle: req.session.handle});
+    const administrator = await db_user.get_user({handle: req.handle});
     if (administrator === undefined) {
         return res.status(401).send({error: 'NOT_SIGNED_IN', message: 'Sign in to open a table.'});
     }
@@ -43,7 +43,7 @@ async function create(req, res) {
  * before the game starts. 200 with the room; missing keys keep their value.
  */
 async function update_settings(req, res) {
-    const handle = req.session.handle;
+    const handle = req.handle;
     if (handle === undefined) {
         throw new RoomError('NOT_SIGNED_IN', 'Sign in to change this table.');
     }
@@ -68,7 +68,7 @@ async function update_settings(req, res) {
 
 /** POST /room/:id/join {team_handle}: always 200 {message}, see docs/api.md. */
 async function join(req, res) {
-    const user = await db_user.get_user({handle: req.session.handle});
+    const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         return res.send({message: 'NOT_SIGNED_IN'});
     }
@@ -93,7 +93,7 @@ async function join(req, res) {
  * host reshuffle the teams). 200 with the room; JSON errors.
  */
 async function leave(req, res) {
-    const user = await db_user.get_user({handle: req.session.handle});
+    const user = await db_user.get_user({handle: req.handle});
     if (user === undefined) {
         throw new RoomError('NOT_SIGNED_IN', 'Sign in to change seats.');
     }
@@ -119,7 +119,7 @@ async function leave(req, res) {
 
 /** POST /room/:id/shuffle: the host deals the seated players out to the teams at random, before the game starts. */
 async function shuffle(req, res) {
-    const handle = req.session.handle;
+    const handle = req.handle;
     if (handle === undefined) {
         throw new RoomError('NOT_SIGNED_IN', 'Sign in to change seats.');
     }

@@ -1,0 +1,31 @@
+# Render Blueprint: one free web service built from the Dockerfile. See docs/deploy.md.
+services:
+  - type: web
+    name: sequence-board-game
+    runtime: docker
+    plan: free
+    # Next to the Neon database (aws-us-east-2); a service can't change region once created.
+    region: ohio
+    branch: version-2
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      # Both from Neon (`neon env pull` writes them to .env.local): the pooled one (-pooler host) for the app,
+      # the direct one for migrations, which hold a session-level advisory lock the pooler doesn't keep.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Signs session cookies and emailed links (Better Auth, see auth.js).
+      - key: SESSION_SECRET
+        generateValue: true
+      # The address players open; emailed links point here and other origins are refused.
+      - key: BETTER_AUTH_URL
+        value: https://sequence-board-game-svxj.onrender.com
+      # Account emails (see docs/deploy.md#email), set in the dashboard. Brevo's API, since the free tier blocks SMTP.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: TRUST_PROXY
+        value: "1"
