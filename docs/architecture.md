@@ -74,7 +74,7 @@ database/
   migrations/         Numbered .sql files (0012 user_avatars): 0001 users, 0002 session, 0003 rooms + room_seats, 0004 games + turns,
                       0005 room names, slug codes and settings, 0006 game mode,
                       0007 highlights and history off by default, 0008 turn timer,
-                      0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables
+                      0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
@@ -87,6 +87,7 @@ entity/               Domain layer (tested)
   avatar.js           Which avatar uploads are accepted (PNG, JPEG, WebP by their bytes, 256 KB)
   room.js             Room names, slug codes and settings (defaults and parsing), game modes
   hints.js            Training hints: suggest_move() for the current player
+  rounds.js           A round's statistics from its final state, and the final summary and verdict of all rounds
   sequence_game.js    Full rules for table games: dealing, turns, jacks, dead cards, sequences, win. Wired to HTTP
   board.js            New_board(): get_deck, play, pretty_deck; move validation
   players.js          create_players({teams}): seating order, hands, team/player count validation
@@ -130,8 +131,8 @@ the whole server, not one per room.
 |---|---|---|
 | `rooms` | table | Code (`id`, a slug of the name such as `friday-night-k3m9`; older rooms have numeric codes), name, creator, team layout, settings (`game_mode`, `history_enabled`, `highlights_enabled`, `auto_draw_dead`, `turn_seconds`), creation time |
 | `room_seats` | taken seat | Primary key (room, team, seat) and unique (room, user): one player per seat, one seat per player. Rows can be removed (standing up, reshuffling) only until the game starts; after that they are the room's history |
-| `games` | room's game | Full rules state as JSONB (hands and deck included, so only `view_for()` output is ever sent), started / updated / finished time, winning team |
-| `turns` | accepted move | Append-only: move number, game turn, player, team, kind, card, cell, and the log events the move produced |
+| `games` | round of a room's game | Round number (the highest is the table's current game), full rules state as JSONB (hands and deck included, so only `view_for()` output is ever sent), started / updated / finished time, winning team, the round's statistics once won |
+| `turns` | accepted move in a round | Append-only: move number, game turn, player, team, kind, card, cell, and the log events the move produced |
 
 A move is one transaction in `controller/room_game.js`: read the game `FOR UPDATE`, apply the rules
 (`entity/sequence_game.js`), then `record_move()` saves the new state and appends the turn. A rejected move
@@ -151,6 +152,11 @@ Each game also stores `turn_deadline` (the turn's start plus the room's `turn_se
 a random card for the current player (`random_move()`), in the same locked transaction as a normal move. It re-checks
 the deadline inside the transaction, so a move made just in time wins. The app itself doesn't start the sweeper, so
 tests drive it with `expire_overdue_turns()`. Games resumed after a restart keep their deadlines.
+
+A table plays its game in rounds. Once a round is won, its statistics (`entity/rounds.js`) are saved with the
+winning move, and the host deals the next round as a new `games` row with the same teams (seats stay fixed) or ends
+the rounds (`rooms.rounds_ended_at`), after which the GameView carries the final summary of every round. A player's
+profile stats count rounds: each won round is a game played.
 
 Everything a client needs to resume is in these tables: who sat where, the settings, and the full game state.
 After a restart, `GET /user/rooms` lists a player's tables and `GET /room/:id/game` returns the game as it was.

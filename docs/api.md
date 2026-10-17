@@ -112,9 +112,11 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
   "team_count": 2, "players_per_team": 1, "seats_taken": 2,
   "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "your_team": 0,                      // null when you only created the table
-  "status": "playing",                 // open (no game yet) | playing | finished
+  "status": "playing",                 // open (no game yet) | playing | finished, of the current round
   "started_at": "…", "last_move_at": "…", "finished_at": null, "winner_team": null,
-  "move_count": 12
+  "move_count": 12,                    // the game columns are the current (latest) round's
+  "round": 2,                          // null before the first round starts
+  "rounds_over": false                 // the host has ended the rounds
  }, …]
 }
 ```
@@ -174,7 +176,9 @@ Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead
     { "handle": "TEAM_1", "players": [ {"handle": "jabir", "name": "Jabir ibne kamal"}, null ] },
     { "handle": "TEAM_2", "players": [ null, null ] }
   ],
-  "game_started": false
+  "game_started": false,
+  "round": null,                             // the current round, from 1; null before the game starts
+  "rounds_over": false                       // the host has ended the rounds
 }
 ```
 Team handles are `TEAM_1 … TEAM_n`. Empty seats are `null`. Player objects are `{handle, name}`.
@@ -204,7 +208,7 @@ NOT_HOST`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED`. To list your rooms,
 
 A full game for a room, run by the server (`entity/sequence_game.js`). Errors are JSON `{error, message}`, where
 `message` is readable by players: `401 NOT_SIGNED_IN`, `403 NOT_A_PLAYER | NOT_HOST`, `404 ROOM_NOT_FOUND | GAME_NOT_FOUND`,
-`409 GAME_ALREADY_STARTED | TABLE_NOT_FULL | NOT_YOUR_TURN | GAME_OVER`, and `400` for rule errors (`CELL_MISMATCH`,
+`409 GAME_ALREADY_STARTED | TABLE_NOT_FULL | NOT_YOUR_TURN | GAME_OVER | ROUND_IN_PROGRESS | ROUNDS_OVER`, and `400` for rule errors (`CELL_MISMATCH`,
 `CELL_OCCUPIED`, `CORNER`, `OWN_CHIP`, `LOCKED_CHIP`, `NOT_DEAD`, `HAS_MOVES`, …).
 
 ### `POST /room/:id/start` (auth)
@@ -212,6 +216,11 @@ Deals a game once every seat is taken. Only the table's creator (the host, `admi
 else gets `403 NOT_HOST`. Seats alternate
 teams (T1, T2, [T3,] T1, …), and the first seat moves first. Returns a GameView and broadcasts `room_updated` and
 `game_updated`.
+
+The game is played in **rounds**. `start` deals round 1; once a round is won, the host either deals another round
+with the same teams ([`POST /room/:id/rounds/next`](#post-roomidroundsnext-auth-host)) or ends the rounds there
+([`POST /room/:id/rounds/end`](#post-roomidroundsend-auth-host)), which gives the table its final result. The GameView
+is always the current (latest) round's, with every won round's statistics in `rounds`.
 
 Moves on one table are applied one at a time: of two simultaneous moves by the current player, the second
 gets `409 NOT_YOUR_TURN`. Every accepted move is recorded (see [`GET /room/:id/turns`](#get-roomidturns)).
@@ -235,6 +244,8 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "sequences": [{"team": 0, "cells": [{"row": 0, "column": 1}, …]}],
   "winner": null,
   "name": "Friday Night",            // the room's name
+  "host": "jabir",                   // the host's handle: they deal each round and decide whether another follows
+  "rounds": {…},                     // the table's rounds, see below
   "hint": null,                      // training games only, for the current player, see below
   "turn_started_at": "2026-10-15T06:55:15.349Z",   // when the current turn began (null for games stored before)
   "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over or while paused)
@@ -245,6 +256,33 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "server_time": "2026-10-15T06:55:21.002Z",       // the server's clock now, to run a turn timer despite clock skew
   "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "log": [{"kind": "place", "turn": 1, "player": "Jabir ibne kamal", "team": 0, "card": "4-Spade", "pos": {"row": 1, "column": 5}, "wild": false}, …]
+}
+```
+
+`rounds` says where the table is in its rounds. `results` lists the won rounds in order (the current one too once it
+is won), and `summary` is the final result once the host has ended the rounds (null until then):
+
+```jsonc
+{
+  "round": 2,                        // the current round, from 1
+  "over": false,                     // the host ended the rounds: no further round can be dealt
+  "results": [{
+    "round": 1, "winner": 0, "started_at": "…", "finished_at": "…",
+    "stats": {                       // null only for a round won before statistics were kept
+      "winner": 0, "turns": 38, "first_player": "jabir",
+      // chips: on the board at the end; placed: chips put down (wild jacks too); removed: opponents' chips taken off
+      "teams": [{"team": 0, "sequences": 2, "chips": 21, "placed": 23, "removed": 3}, …],
+      // plays: cards played; wilds: two-eyed jacks; removals: one-eyed jacks; timed_out: moves made for them
+      "players": [{"handle": "jabir", "name": "Jabir ibne kamal", "team": 0, "plays": 19, "wilds": 2, "removals": 2,
+                   "exchanges": 1, "passes": 0, "timed_out": 0}, …]
+    }
+  }],
+  "summary": {                       // once over: every round added up
+    "rounds_played": 3, "turns": 104,
+    "teams": [{"team": 0, "rounds_won": 2, "sequences": 5, "placed": 61, "removed": 7}, …],
+    "players": [{"handle": "jabir", …totals as in a round…}, …],
+    "verdict": {"winner": 0, "leaders": [0]}   // most rounds won; with several leaders it's a draw and winner is null
+  }
 }
 ```
 
@@ -280,14 +318,24 @@ is away until their page reconnects, which it does by itself. Every arrival and 
 Each applies the move for the current player, draws a replacement card, and returns the new GameView. Every change
 broadcasts `game_updated`.
 
+### `POST /room/:id/rounds/next` (auth, host)
+Once the current round is won, deals the next one: the same teams and seats, an empty board, a fresh deck. Returns
+the new round's GameView and broadcasts `game_updated` and `room_updated`. `403 NOT_HOST`, `404 GAME_NOT_FOUND`
+(nothing dealt yet), `409 ROUND_IN_PROGRESS` (the round isn't won yet), `409 ROUNDS_OVER`.
+
+### `POST /room/:id/rounds/end` (auth, host)
+Once the current round is won, ends the rounds: the GameView's `rounds.summary` then holds the final result, and no
+further round can be dealt. Returns the GameView and broadcasts `game_updated` and `room_updated`. Same errors as
+`rounds/next`.
+
 ### `GET /room/:id/turns`
-The table's moves so far, oldest first. Public, like the game view, and never includes hands or the deck.
+The current round's moves so far, oldest first. Public, like the game view, and never includes hands or the deck.
 `404 ROOM_NOT_FOUND | GAME_NOT_FOUND`, `403 HISTORY_DISABLED` when the room plays without history; `[]` when the
 game has started but nobody has moved.
 
 ```jsonc
 [{
-  "move_number": 1,                    // 1, 2, 3… across the game
+  "move_number": 1,                    // 1, 2, 3… across the round
   "turn": 1,                           // the game's turn counter; an exchange shares it with the next play
   "player": {"handle": "jabir", "name": "Jabir ibne kamal"},
   "team": 0,
