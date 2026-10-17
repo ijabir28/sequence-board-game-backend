@@ -1,4 +1,4 @@
-const {create_game, next_first_seat, apply_move, view_for, legal_targets, find_new_sequences, empty_chip_grid, random_move} = require('./sequence_game');
+const {create_game, random_first_seat, next_first_seat, apply_move, view_for, legal_targets, find_new_sequences, empty_chip_grid, random_move} = require('./sequence_game');
 const board_deck = require('../data/board_deck.json');
 
 function teams_of(team_count, players_per_team) {
@@ -46,6 +46,21 @@ describe('create_game', function () {
                 create_game({teams: teams_of(2, 2), first});
             }).toThrow(/no seat/);
         }
+    });
+
+    it('draws a first seat at random from every seat at the table', function () {
+        const teams = teams_of(2, 2);
+        expect([0, 0.24, 0.25, 0.5, 0.99, 0.9999999].map(function (r) {
+            return random_first_seat(teams, function () {
+                return r;
+            });
+        })).toEqual([0, 0, 1, 2, 3, 3]);
+        expect(random_first_seat(teams_of(3, 1), function () {
+            return 0.7;
+        })).toBe(2);
+        const seen = new Set();
+        for (let i = 0; i < 200; i++) seen.add(random_first_seat(teams));
+        expect([...seen].sort()).toEqual([0, 1, 2, 3]);
     });
 
     it('passes the first turn to the next team every round, and round each team\'s players', function () {

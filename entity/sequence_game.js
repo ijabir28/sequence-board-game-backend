@@ -149,6 +149,14 @@ function create_game({teams, rules = {}, random = Math.random, first = 0}) {
     }, random);
 }
 
+/** A seat at random: who moves first in a table's first round. Later rounds rotate from it (next_first_seat()). */
+function random_first_seat(teams, random = Math.random) {
+    const seats = teams.reduce(function (count, team) {
+        return count + team.players.length;
+    }, 0);
+    return Math.min(seats - 1, Math.floor(random() * seats));
+}
+
 /**
  * The seat that moves first in the round after `state`'s: the next seat round the table. Seats alternate teams, so
  * the first turn passes to the next team every round, and within a team to its next player.
@@ -551,6 +559,7 @@ module.exports = {
     RuleError,
     random_move,
     create_game,
+    random_first_seat,
     next_first_seat,
     apply_move,
     view_for,
