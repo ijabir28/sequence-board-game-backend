@@ -15,5 +15,6 @@ router.put('/avatar', body_parser.raw({type: ACCEPTED_TYPES, limit: AVATAR_MAX_B
 router.delete('/avatar', user.remove_avatar);
 router.get('/avatar/:id', user.avatar);
 router.put('/card-deck', user.set_card_deck);
+router.put('/board-style', user.set_board_style);
 
 module.exports = router;

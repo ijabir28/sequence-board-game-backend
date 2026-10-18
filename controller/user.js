@@ -1,6 +1,6 @@
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
-const {UserError, real_email, validate_card_deck} = require('../entity/user');
+const {UserError, real_email, validate_card_deck, validate_board_style} = require('../entity/user');
 const {check_avatar} = require('../entity/avatar');
 
 // The signed-in player's endpoints. Signing up, in and out is Better Auth's (/api/auth, see auth.js).
@@ -38,6 +38,7 @@ function public_profile(user, stats) {
         email_verified: user.email_verified,
         image: user.image,
         card_deck: user.card_deck,
+        board_style: user.board_style,
         created_at: user.created_at,
         stats,
     };
@@ -105,6 +106,17 @@ async function set_card_deck(req, res) {
     res.send({card_deck: checked.card_deck});
 }
 
+/** PUT /user/board-style {board_style}: 200 {board_style}, how the player's board cells look on every device. */
+async function set_board_style(req, res) {
+    const user = await signed_in_user(req);
+    const checked = validate_board_style(req.body && req.body.board_style);
+    if (checked.error) {
+        throw new UserError('INVALID_BOARD_STYLE', checked.error);
+    }
+    await db_user.set_board_style({user_id: user.id, board_style: checked.board_style});
+    res.send({board_style: checked.board_style});
+}
+
 // The signed-in user's tables, newest first: where they sat and how far each game got.
 const ROOMS_PER_PAGE = {default: 10, max: 50};
 
@@ -136,6 +148,7 @@ module.exports = {
     remove_avatar: handler(remove_avatar),
     avatar: handler(avatar),
     set_card_deck: handler(set_card_deck),
+    set_board_style: handler(set_board_style),
     rooms: handler(rooms),
     current_game: handler(current_game),
 };
