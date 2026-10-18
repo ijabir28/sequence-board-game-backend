@@ -66,11 +66,12 @@ address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 mi
 Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name, email, email_verified, image, card_deck, created_at, stats: {played, won, playing}}`, or
-`401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before emails
-were asked for; `image` is the avatar's URL or `null`; `card_deck` is the hand card deck the player chose (see
-`PUT /user/card-deck`) or `null`. `stats` counts the table games the player has a seat in:
-finished (`played`), won by their team (`won`) and in progress (`playing`).
+`200 {handle, name, email, email_verified, image, card_deck, board_style, created_at, stats: {played, won, playing}}`,
+or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before
+emails were asked for; `image` is the avatar's URL or `null`; `card_deck` is the hand card deck the player chose (see
+`PUT /user/card-deck`) and `board_style` how their board's cells look (`PUT /user/board-style`), each `null` until
+chosen. `stats` counts the table games the player has a seat in: finished (`played`), won by their team (`won`) and
+in progress (`playing`).
 
 ### `PUT /user/avatar` (auth)
 The picture as the raw body, `Content-Type` `image/png`, `image/jpeg` or `image/webp`, at most 256 KB (the frontend
@@ -89,6 +90,10 @@ so the response is cached for a year. It is served with `nosniff` and a sandboxi
 The design the player's hand is shown in, kept on the account so it follows them to every device. The frontend owns
 the list of decks (its `src/decks/decks.ts`), so the server only checks the id's shape: 1 to 32 lowercase letters,
 digits or dashes. `200 {card_deck}`, or `400 INVALID_CARD_DECK`.
+
+### `PUT /user/board-style {board_style}` (auth)
+How the player's board cells look (the frontend's board styles, `dark` or `cards` today), kept on the account like the
+card deck and checked the same way. `200 {board_style}`, or `400 INVALID_BOARD_STYLE`.
 
 ### Profile changes (Better Auth)
 All need the session cookie and a trusted `Origin`.
