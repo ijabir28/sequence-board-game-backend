@@ -28,15 +28,22 @@ class UserError extends Error {
     }
 }
 
-// A card deck's id, as the frontend names its decks (`classic`, `four-colour`). Migration 0014 checks the same shape.
-const CARD_DECK_PATTERN = /^[a-z0-9-]{1,32}$/;
+// The id of one of the frontend's display choices, a card deck (`classic`, `four-colour`) or a board style (`dark`,
+// `cards`). The frontend owns the lists; migrations 0014 and 0015 check the same shape.
+const CHOICE_ID_PATTERN = /^[a-z0-9-]{1,32}$/;
+
+function is_choice_id(value) {
+    return typeof value === 'string' && CHOICE_ID_PATTERN.test(value);
+}
 
 /** {card_deck}, or {error} when it isn't a deck id. */
 function validate_card_deck(card_deck) {
-    if (typeof card_deck !== 'string' || !CARD_DECK_PATTERN.test(card_deck)) {
-        return {error: 'Choose one of the card decks.'};
-    }
-    return {card_deck};
+    return is_choice_id(card_deck) ? {card_deck} : {error: 'Choose one of the card decks.'};
+}
+
+/** {board_style}, or {error} when it isn't a board style id. */
+function validate_board_style(board_style) {
+    return is_choice_id(board_style) ? {board_style} : {error: 'Choose one of the board styles.'};
 }
 
 function normalize_handle(handle) {
@@ -81,5 +88,5 @@ async function verify_password(password, stored_hash) {
 
 module.exports = {
     UserError, HANDLE_PATTERN, NAME_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
-    PLACEHOLDER_EMAIL_DOMAIN, normalize_handle, validate_name, validate_card_deck, real_email, hash_password, verify_password,
+    PLACEHOLDER_EMAIL_DOMAIN, normalize_handle, validate_name, validate_card_deck, validate_board_style, real_email, hash_password, verify_password,
 };

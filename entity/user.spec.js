@@ -1,4 +1,4 @@
-const {normalize_handle, validate_name, validate_card_deck, hash_password, verify_password} = require('./user');
+const {normalize_handle, validate_name, validate_card_deck, validate_board_style, hash_password, verify_password} = require('./user');
 
 describe('normalize_handle', function () {
     test('trims and lower-cases, so handles are case-insensitive', function () {
@@ -28,6 +28,15 @@ describe('validate_card_deck', function () {
     test('refuses anything else', function () {
         for (const card_deck of ['', 'Classic', '../x', 'x'.repeat(33), 7, null, undefined]) {
             expect(validate_card_deck(card_deck).error).toBeDefined();
+        }
+    });
+});
+
+describe('validate_board_style', function () {
+    test('accepts a board style id and refuses anything else', function () {
+        expect(validate_board_style('cards')).toEqual({board_style: 'cards'});
+        for (const board_style of ['', 'Cards', 'x'.repeat(33), 1, null]) {
+            expect(validate_board_style(board_style).error).toBeDefined();
         }
     });
 });

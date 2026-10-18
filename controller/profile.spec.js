@@ -129,6 +129,21 @@ describe_with_database('profile', function () {
         });
     });
 
+    describe('board style', function () {
+        test('is null until chosen, then saved on the account', async function () {
+            expect((await player.get('/user/profile')).body.board_style).toBeNull();
+            const saved = await player.put('/user/board-style').send({board_style: 'cards'});
+            expect([saved.status, saved.body]).toEqual([200, {board_style: 'cards'}]);
+            expect((await player.get('/user/profile')).body.board_style).toBe('cards');
+        });
+
+        test('refuses something that is not a board style id, and needs a session', async function () {
+            const response = await player.put('/user/board-style').send({board_style: 'DARK!'});
+            expect([response.status, response.body.error]).toEqual([400, 'INVALID_BOARD_STYLE']);
+            expect((await request(app).put('/user/board-style').send({board_style: 'dark'})).status).toBe(401);
+        });
+    });
+
     describe('password', function () {
         test('changes with the current one, signs out other devices and tells the owner', async function () {
             const other_device = await verified_account(request, app, {username: 'changer', email: 'changer@example.test'});
