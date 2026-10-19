@@ -156,7 +156,7 @@ Settings and their defaults:
 
 | Setting | Default | Effect |
 |---|---|---|
-| `mode` | `"standard"` | `"training"`: the player whose turn it is gets a `hint` in the GameView. Standard games never get hints |
+| `mode` | `"standard"` | `"training"`: the player whose turn it is gets a `hint` in the GameView. Standard games never get hints. Retired: the frontend no longer offers it, and migration 0016 set every training room to standard |
 | `history` | `false` | Off: `GET /room/:id/turns` is `403 HISTORY_DISABLED` and the GameView's `log` keeps only the latest move |
 | `highlights` | `false` | Off: clients don't light up legal cells (the server only reports the setting) |
 | `turn_seconds` | `90` | Seconds each player has for a turn. Clients offer 30, 60, 90, 120 and 180, or any whole number from 15 to 600 |
