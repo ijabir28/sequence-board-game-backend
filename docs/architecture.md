@@ -141,7 +141,7 @@ changes nothing, and moves on one table can't interleave. Joining and starting l
 Settings can change (by the room's creator) until the game starts, then they are fixed. Rules that change play
 (`auto_draw_dead`) are also copied into the game state's `rules` when it is dealt, so a resumed game always plays by
 the rules it started with. Display settings (`history`, `highlights`) are read from the room for every GameView. There are no game modes or
-hints: training tables were retired (0016), and learning the rules is the frontend's interactive training. A `mode`
+hints: training tables were retired (0016 dropped their column), and learning the rules is the frontend's interactive training. A `mode`
 sent by an older client is ignored. Only the host can start the game.
 With history off, `turns` is still written (the "Your tables" move count uses it) but never served.
 
