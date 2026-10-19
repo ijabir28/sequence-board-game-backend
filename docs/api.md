@@ -121,7 +121,7 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
   "id": "friday-night-k3m9", "name": "Friday Night", "created_at": "…", "administrator": "jabir",
   "administrator_name": "Jabir ibne kamal",
   "team_count": 2, "players_per_team": 1, "seats_taken": 2,
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
+  "settings": {"history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "your_team": 0,                      // null when you only created the table
   "status": "playing",                 // open (no game yet) | playing | finished, of the current round
   "started_at": "…", "last_move_at": "…", "finished_at": null, "winner_team": null,
@@ -141,9 +141,8 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
 Rooms, seats, games and every move are stored in PostgreSQL, so tables and games in progress survive restarts.
 
 ### `POST /room/create` (auth)
-Body `{number_of_team, number_of_player_in_each_team, name?, mode?, history?, highlights?, auto_draw_dead?,
-turn_seconds?, dead_cards?, exchanges_per_turn?}`. Counts are numbers or numeric strings; `mode` is `"standard"` or
-`"training"`; `turn_seconds` is a whole number from 15 to 600; `dead_cards` is `"manual"` or `"indicator"`;
+Body `{number_of_team, number_of_player_in_each_team, name?, history?, highlights?, auto_draw_dead?,
+turn_seconds?, dead_cards?, exchanges_per_turn?}`. Counts are numbers or numeric strings; `turn_seconds` is a whole number from 15 to 600; `dead_cards` is `"manual"` or `"indicator"`;
 `exchanges_per_turn` is `null` or `"unlimited"`, or a whole number from 1 to 10; the other settings are booleans (or
 `"true"` / `"false"`).
 `200 {id}`. `id` is the table's code: a slug of its name plus a 4-character suffix, such as `"friday-night-k3m9"`.
@@ -156,7 +155,6 @@ Settings and their defaults:
 
 | Setting | Default | Effect |
 |---|---|---|
-| `mode` | `"standard"` | `"training"`: the player whose turn it is gets a `hint` in the GameView. Standard games never get hints |
 | `history` | `false` | Off: `GET /room/:id/turns` is `403 HISTORY_DISABLED` and the GameView's `log` keeps only the latest move |
 | `highlights` | `false` | Off: clients don't light up legal cells (the server only reports the setting) |
 | `turn_seconds` | `90` | Seconds each player has for a turn. Clients offer 30, 60, 90, 120 and 180, or any whole number from 15 to 600 |
@@ -181,7 +179,7 @@ Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead
   "administrator_name": "Jabir ibne kamal",  // the host's display name, for messages
   "id": "friday-night-k3m9",
   "name": "Friday Night",
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
+  "settings": {"history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "created_at": "2026-10-15T05:48:22.696Z",
   "teams": [
     { "handle": "TEAM_1", "players": [ {"handle": "jabir", "name": "Jabir ibne kamal"}, null ] },
@@ -260,7 +258,6 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "name": "Friday Night",            // the room's name
   "host": "jabir",                   // the host's handle: they deal each round and decide whether another follows
   "rounds": {…},                     // the table's rounds, see below
-  "hint": null,                      // training games only, for the current player, see below
   "turn_started_at": "2026-10-15T06:55:15.349Z",   // when the current turn began (null for games stored before)
   "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over or while paused)
   "turn_paused": false,              // the current player is away from the table, so their turn waits for them
@@ -268,7 +265,7 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "away": ["sakib"],                 // seated players whose game page isn't open
   "presence_token": "q9…",           // seated players only: send it with the socket's join_game (null for spectators)
   "server_time": "2026-10-15T06:55:21.002Z",       // the server's clock now, to run a turn timer despite clock skew
-  "settings": {"mode": "standard", "history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
+  "settings": {"history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "log": [{"kind": "place", "turn": 1, "player": "Jabir ibne kamal", "team": 0, "card": "4-Spade", "pos": {"row": 1, "column": 5}, "wild": false}, …]
 }
 ```
@@ -299,18 +296,6 @@ is won), and `summary` is the final result once the host has ended the rounds (n
   }
 }
 ```
-
-`hint` is null except for the player whose turn it is in a training game, where it is the suggested move
-(`entity/hints.js`):
-
-```jsonc
-{"type": "play", "hand_index": 2, "target": {"row": 3, "column": 5}, "reason": {"kind": "block", "length": 5, "team": 1}}
-{"type": "exchange", "hand_index": 0, "reason": {"kind": "dead"}}
-{"type": "pass", "reason": {"kind": "pass"}}
-```
-
-`reason.kind` is `sequence` (completes one), `extend` (builds your line to `length`), `block` (takes the cell that
-would give `team` a line of `length`), `break` (a one-eyed jack breaking `team`'s line of `length`), `dead` or `pass`.
 
 When `turn_deadline` passes, the server plays for the current player: a random card from their hand that can be
 played, on a random legal cell (after exchanging a dead card if nothing else can be played; a pass if nothing can be

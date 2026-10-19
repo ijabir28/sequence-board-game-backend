@@ -10,12 +10,6 @@ const ADJECTIVES = ['amber', 'brave', 'calm', 'clever', 'cosmic', 'golden', 'jol
 const NOUNS = ['badger', 'comet', 'falcon', 'harbor', 'lantern', 'maple', 'meadow', 'otter', 'pebble', 'raven', 'river', 'summit', 'thistle', 'tiger', 'willow', 'zephyr'];
 
 /**
- * How a game is played. `training` is for learning: the player whose turn it is gets hints (a suggested move and
- * why). `standard` games never get hints.
- */
-const GAME_MODES = Object.freeze(['standard', 'training']);
-
-/**
  * How players find their dead cards. `manual`: nothing marks them; a player who spots one asks to exchange it, and
  * the server checks it really is dead. `indicator`: dead cards are marked in the hand (and can be auto-drawn).
  */
@@ -31,7 +25,6 @@ const TURN_SECONDS_MAX = 600;
 
 /** What a room does when its creator doesn't say otherwise. */
 const DEFAULT_SETTINGS = Object.freeze({
-    mode: 'standard',
     // Players can read every move so far (the move log and GET /room/:id/turns). Off unless the host turns it on.
     history: false,
     // Legal cells light up when a card is picked. Off unless the host turns it on.
@@ -133,11 +126,6 @@ function shuffle_seats(players, team_count, players_per_team, random = Math.rand
     });
 }
 
-function parse_mode(value) {
-    if (GAME_MODES.includes(value)) return value;
-    throw new RoomError('INVALID_SETTINGS', `The setting "mode" must be one of: ${GAME_MODES.join(', ')}.`);
-}
-
 function parse_turn_seconds(value) {
     const seconds = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
     if (Number.isInteger(seconds) && seconds >= TURN_SECONDS_MIN && seconds <= TURN_SECONDS_MAX) return seconds;
@@ -163,7 +151,6 @@ function parse_exchanges_per_turn(value) {
 }
 
 const PARSERS = {
-    mode: parse_mode,
     turn_seconds: parse_turn_seconds,
     dead_cards: parse_dead_cards,
     exchanges_per_turn: parse_exchanges_per_turn,
@@ -177,7 +164,7 @@ function parse_flag(value, key) {
 
 /**
  * Reads settings from a request body. Only keys in DEFAULT_SETTINGS are read; a missing key keeps the value
- * from `current` (the defaults for a new room). Throws INVALID_SETTINGS for an unknown mode, a turn timer out of
+ * from `current` (the defaults for a new room). Throws INVALID_SETTINGS for an unknown dead card mode, a turn timer out of
  * range, or a flag that isn't a boolean.
  */
 function parse_settings(body = {}, current = DEFAULT_SETTINGS) {
@@ -191,7 +178,6 @@ function parse_settings(body = {}, current = DEFAULT_SETTINGS) {
 module.exports = {
     RoomError,
     DEFAULT_SETTINGS,
-    GAME_MODES,
     DEAD_CARD_MODES,
     EXCHANGES_PER_TURN_MAX,
     TURN_TIMER_PRESETS,

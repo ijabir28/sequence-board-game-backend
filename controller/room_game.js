@@ -4,7 +4,6 @@ const {transaction} = require('../database/pool');
 const socket_server = require('../socket');
 const {broadcast_room} = require('./room');
 const {RuleError, create_game, random_first_seat, next_first_seat, apply_move, view_for, random_move} = require('../entity/sequence_game');
-const {suggest_move} = require('../entity/hints');
 const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
 
@@ -129,13 +128,9 @@ async function rounds_of(room, game, client) {
     return {round: game.round || 1, over, results, summary: over ? series_summary(results, game.team_count) : null};
 }
 
-// The game as `handle` sees it, under the room's settings. Hints exist only in training games, and only for the
-// player whose turn it is, so a standard game never sends one. `rounds` is from rounds_of().
+// The game as `handle` sees it, under the room's settings. `rounds` is from rounds_of().
 function view(room, game, handle, rounds) {
     const seen = view_for(game, handle, room.settings);
-    const hint = room.settings.mode === 'training' && seen.current_player !== null && seen.current_player === handle
-        ? suggest_move(game)
-        : null;
     // server_time lets clients run the turn timer from their own clock even when it is off.
     const deadline = turn_deadline(room, game);
     const seated = game.players.some(function (player) {
@@ -146,7 +141,6 @@ function view(room, game, handle, rounds) {
         // The host deals each round, and decides after one is won whether to play another.
         host: room.administrator,
         rounds,
-        hint,
         turn_started_at: game.turn_started_at || null,
         turn_deadline: deadline === null ? null : deadline.toISOString(),
         // While the current player is away the turn is paused: no deadline, and the time they'll have left.

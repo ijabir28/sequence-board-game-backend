@@ -66,7 +66,7 @@ describe('settings', function () {
     test('missing keys keep the defaults', function () {
         expect(parse_settings({})).toEqual(DEFAULT_SETTINGS);
         expect(DEFAULT_SETTINGS).toEqual({
-            mode: 'standard', history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
+            history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
             dead_cards: 'manual', exchanges_per_turn: null,
         });
     });
@@ -77,17 +77,13 @@ describe('settings', function () {
     });
 
     test('changes only the given keys of current settings', function () {
-        const current = {mode: 'training', history: false, highlights: false, auto_draw_dead: true, turn_seconds: 90};
-        expect(parse_settings({highlights: true}, current)).toEqual({mode: 'training', history: false, highlights: true, auto_draw_dead: true, turn_seconds: 90});
+        const current = {history: false, highlights: false, auto_draw_dead: true, turn_seconds: 90};
+        expect(parse_settings({highlights: true}, current)).toEqual({history: false, highlights: true, auto_draw_dead: true, turn_seconds: 90});
     });
 
-    test('reads the game mode', function () {
-        expect(parse_settings({mode: 'training'}).mode).toBe('training');
-        for (const bad of ['TRAINING', 'hints', true]) {
-            expect(function () {
-                parse_settings({mode: bad});
-            }).toThrow(expect.objectContaining({code: 'INVALID_SETTINGS'}));
-        }
+    test('ignores the retired game mode', function () {
+        expect(parse_settings({mode: 'training'})).toEqual(DEFAULT_SETTINGS);
+        expect(parse_settings({mode: 'chaos'})).not.toHaveProperty('mode');
     });
 
     test('reads the turn timer: 90 seconds by default, any whole number from 15 to 600', function () {
