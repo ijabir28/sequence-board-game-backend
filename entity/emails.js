@@ -20,8 +20,7 @@ function layout({name, paragraphs, action, footer}) {
         text.push(`${action.label}: ${action.url}`);
         html.push(
             `<p><a href="${escape_html(action.url)}" style="display:inline-block;padding:10px 18px;border-radius:8px;` +
-            `background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600">${escape_html(action.label)}</a></p>`,
-            `<p style="color:#64748b;font-size:13px">Or paste this link into your browser: ${escape_html(action.url)}</p>`
+            `background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600">${escape_html(action.label)}</a></p>`
         );
     }
     text.push(footer, '— Sequence');
