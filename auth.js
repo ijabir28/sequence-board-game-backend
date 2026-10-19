@@ -282,4 +282,4 @@ function load_session(req, res, next) {
         .catch(next);
 }
 
-module.exports = {auth, load_session, session_secret, EMAIL_VERIFIED_PAGE, RESET_PASSWORD_PAGE};
+module.exports = {auth, load_session, session_secret, base_url, EMAIL_VERIFIED_PAGE, RESET_PASSWORD_PAGE};

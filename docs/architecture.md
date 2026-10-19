@@ -200,6 +200,7 @@ current one. Handles never change, since games and socket tokens refer to player
 | `DATABASE_URL` | the compose database on localhost | PostgreSQL connection |
 | `SESSION_SECRET` | a fixed development value | Signs session cookies, emailed links and socket tokens (`BETTER_AUTH_SECRET` also works). **Required** when `NODE_ENV=production` |
 | `BETTER_AUTH_URL` | `http://localhost:5173` | The address players open: emailed links point here, other origins are refused. **Required** when `NODE_ENV=production` |
+| `REDIRECT_HOSTS` | none | Comma-separated host names that redirect (`308`, same path) to `BETTER_AUTH_URL`, e.g. an old address. `/health` is not redirected |
 | `BREVO_API_KEY` | none | Sends account emails through Brevo's API over HTTPS (for hosts that block SMTP, like Render's free tier) |
 | `SMTP_URL` | none: emails are logged | SMTP server for account emails when there is no `BREVO_API_KEY`, e.g. `smtps://user:password@smtp.example.com:465` |
 | `MAIL_FROM` | `Sequence <no-reply@sequence.invalid>` | Sender of account emails; use an address the SMTP service lets you send from |

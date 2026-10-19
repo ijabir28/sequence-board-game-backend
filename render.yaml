@@ -22,6 +22,9 @@ services:
       # The address players open; emailed links point here and other origins are refused.
       - key: BETTER_AUTH_URL
         value: https://sequence.fifteens.app
+      # The service's own onrender.com address, from before the custom domain: it redirects to BETTER_AUTH_URL.
+      - key: REDIRECT_HOSTS
+        value: sequence-board-game-svxj.onrender.com
       # Account emails (see docs/deploy.md#email), set in the dashboard. Brevo's API, since the free tier blocks SMTP.
       - key: BREVO_API_KEY
         sync: false
