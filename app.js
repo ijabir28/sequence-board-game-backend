@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const logger = require('morgan');
 const {ping} = require('./database/pool');
-const {load_session} = require('./auth');
+const {load_session, base_url} = require('./auth');
 
 
 const  auth_router = require("./routes/auth");
@@ -17,6 +17,21 @@ const app = express();
 // sign-in rate limit relies on. See https://expressjs.com/en/guide/behind-proxies.html
 if (process.env.TRUST_PROXY) {
     app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+}
+
+// Old addresses of the app (REDIRECT_HOSTS, comma-separated host names, e.g. the onrender.com one after a custom
+// domain took over) send players to the same page on BETTER_AUTH_URL. Sign-in only works there, since other
+// origins are refused. 308 keeps the method and body, for an API call that still uses an old address. /health stays
+// put, since Render's health check may come in on the old host.
+const redirect_hosts = (process.env.REDIRECT_HOSTS || '').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean);
+if (redirect_hosts.length > 0) {
+    const target = new URL(base_url()).origin;
+    app.use(function (req, res, next) {
+        if (req.path === '/health' || !redirect_hosts.includes(req.hostname)) {
+            return next();
+        }
+        res.redirect(308, target + req.originalUrl);
+    });
 }
 
 // Jest sets NODE_ENV=test; request logs would bury the test output.

@@ -54,3 +54,42 @@ describe('built frontend', function () {
         expect(response.status).toBe(404);
     });
 });
+
+describe('old addresses', function () {
+    let app;
+
+    beforeAll(function () {
+        process.env.REDIRECT_HOSTS = 'old.onrender.com, Older.example.com';
+        process.env.BETTER_AUTH_URL = 'https://sequence.example.com';
+        jest.isolateModules(function () {
+            app = require('./app');
+        });
+    });
+
+    afterAll(function () {
+        delete process.env.REDIRECT_HOSTS;
+        delete process.env.BETTER_AUTH_URL;
+    });
+
+    test('send players to the same page on BETTER_AUTH_URL', async function () {
+        const response = await request(app).get('/table/abc?seat=2').set('Host', 'old.onrender.com');
+        expect(response.status).toBe(308);
+        expect(response.headers.location).toBe('https://sequence.example.com/table/abc?seat=2');
+    });
+
+    test('match host names without case or port', async function () {
+        const response = await request(app).post('/api/auth/sign-in/email').set('Host', 'older.example.com:443');
+        expect(response.status).toBe(308);
+        expect(response.headers.location).toBe('https://sequence.example.com/api/auth/sign-in/email');
+    });
+
+    test('still answer the health check', async function () {
+        const response = await request(app).get('/health').set('Host', 'old.onrender.com');
+        expect(response.status).not.toBe(308);
+    });
+
+    test('leave every other host alone', async function () {
+        const response = await request(app).get('/nothing-here.json').set('Host', 'sequence.example.com');
+        expect(response.status).toBe(404);
+    });
+});

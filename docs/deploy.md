@@ -37,9 +37,10 @@ when `NODE_ENV=production`, which the image sets).
 
 Players open **https://sequence.fifteens.app**. The domain is registered at Name.com, where a `CNAME` record points
 `sequence` at the service's `sequence-board-game-svxj.onrender.com`; Render (service → Settings → Custom Domains)
-verified it and issues its certificate. `BETTER_AUTH_URL` in [render.yaml](../render.yaml) is the custom domain, so
-sign-in from the `onrender.com` address is refused (`403 INVALID_ORIGIN`). Recreating the service gives it a new
-`onrender.com` address: point the `CNAME` there and add the domain to the new service.
+verified it and issues its certificate. `BETTER_AUTH_URL` in [render.yaml](../render.yaml) is the custom domain, and
+`REDIRECT_HOSTS` sends anyone on the `onrender.com` address to the same page there (`308`; `/health` excepted), since
+sign-in from other origins is refused. Recreating the service gives it a new `onrender.com` address: point the
+`CNAME` there, add the domain to the new service and put the new address in `REDIRECT_HOSTS`.
 
 ## Updating
 
@@ -57,6 +58,7 @@ sign-in from the `onrender.com` address is refused (`403 INVALID_ORIGIN`). Recre
 | `DATABASE_URL_UNPOOLED` | you (Neon) | Direct connection, for migrations |
 | `SESSION_SECRET` | Render (generated) | Signs session cookies, emailed links and socket presence tokens; changing it signs everyone out |
 | `BETTER_AUTH_URL` | render.yaml | The address players open; emailed links point here and other origins are refused. Update it if the service's URL changes |
+| `REDIRECT_HOSTS` | render.yaml | Old host names (comma-separated) that redirect to `BETTER_AUTH_URL`: the `onrender.com` one |
 | `BREVO_API_KEY`, `MAIL_FROM` | you (Render dashboard) | How account emails go out, see [Email](#email). Without them, emails only reach the service's log |
 | `SMTP_URL` | optional | SMTP instead of Brevo, where outgoing SMTP isn't blocked |
 | `TRUST_PROXY` | render.yaml | Hops of reverse proxy in front, so the sign-in rate limit sees the client's IP |
