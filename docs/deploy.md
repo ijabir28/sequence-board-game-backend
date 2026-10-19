@@ -33,6 +33,14 @@ backend serves the build from `FRONTEND_DIST`: its files, and `index.html` for e
 Don't run `npm run db:seed` against production: the development accounts have known passwords (the script refuses
 when `NODE_ENV=production`, which the image sets).
 
+## Custom domain
+
+Players open **https://sequence.fifteens.app**. The domain is registered at Name.com, where a `CNAME` record points
+`sequence` at the service's `sequence-board-game-svxj.onrender.com`; Render (service → Settings → Custom Domains)
+verified it and issues its certificate. `BETTER_AUTH_URL` in [render.yaml](../render.yaml) is the custom domain, so
+sign-in from the `onrender.com` address is refused (`403 INVALID_ORIGIN`). Recreating the service gives it a new
+`onrender.com` address: point the `CNAME` there and add the domain to the new service.
+
 ## Updating
 
 - **Backend:** pushing to `version-2` redeploys.
