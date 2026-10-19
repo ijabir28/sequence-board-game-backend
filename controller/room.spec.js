@@ -99,7 +99,7 @@ describe_with_database('rooms and table games', function () {
             const room = (await request(app).get(`/room/${response.body.id}`)).body;
             expect(room.name).toBe('Friday Night Café');
             expect(room.settings).toEqual({
-                mode: 'standard', history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
+                history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
                 dead_cards: 'manual', exchanges_per_turn: null,
             });
         });
@@ -122,15 +122,16 @@ describe_with_database('rooms and table games', function () {
         });
 
         test('settings chosen at creation are stored', async function () {
+            // `mode` is retired: older clients still send it, and it is ignored.
             const response = await agents.alice.post('/room/create').send({
                 number_of_team: 2, number_of_player_in_each_team: 1, mode: 'training', history: false, highlights: 'false', auto_draw_dead: true,
             }).expect(200);
             const room = (await request(app).get(`/room/${response.body.id}`)).body;
             expect(room.settings).toEqual({
-                mode: 'training', history: false, highlights: false, auto_draw_dead: true, turn_seconds: 90,
+                history: false, highlights: false, auto_draw_dead: true, turn_seconds: 90,
                 dead_cards: 'manual', exchanges_per_turn: null,
             });
-            const bad = await agents.alice.post('/room/create').send({number_of_team: 2, number_of_player_in_each_team: 1, mode: 'easy'});
+            const bad = await agents.alice.post('/room/create').send({number_of_team: 2, number_of_player_in_each_team: 1, dead_cards: 'easy'});
             expect([bad.status, bad.body.error]).toEqual([400, 'INVALID_SETTINGS']);
 
             const custom = await agents.alice.post('/room/create').send({number_of_team: 2, number_of_player_in_each_team: 1, turn_seconds: 45});
@@ -810,44 +811,17 @@ describe_with_database('rooms and table games', function () {
         });
     });
 
-    describe('game modes', function () {
-        async function started(mode) {
-            const id = (await agents.alice.post('/room/create')
-                .send({number_of_team: 2, number_of_player_in_each_team: 1, mode}).expect(200)).body.id;
-            await join('alice', id, 'TEAM_1');
-            await join('bob', id, 'TEAM_2');
-            await agents.alice.post(`/room/${id}/start`).expect(200);
-            return id;
+    test('the game never carries a hint, even for a room created with the retired training mode', async function () {
+        const id = (await agents.alice.post('/room/create')
+            .send({number_of_team: 2, number_of_player_in_each_team: 1, mode: 'training'}).expect(200)).body.id;
+        await join('alice', id, 'TEAM_1');
+        await join('bob', id, 'TEAM_2');
+        await agents.alice.post(`/room/${id}/start`).expect(200);
+        for (const handle of ['alice', 'bob']) {
+            const game = (await agents[handle].get(`/room/${id}/game`)).body;
+            expect(game).not.toHaveProperty('hint');
+            expect(game.settings).not.toHaveProperty('mode');
         }
-
-        test('a training game hints the player whose turn it is, and nobody else', async function () {
-            const id = await started('training');
-            const state = await require('../database/games').get({room_id: id});
-            const current = state.players[state.current].handle;
-            const waiting = current === 'alice' ? 'bob' : 'alice';
-
-            const mine = (await agents[current].get(`/room/${id}/game`)).body;
-            expect(mine.settings.mode).toBe('training');
-            expect(mine.hint).toEqual(require('../entity/hints').suggest_move(state));
-            expect(mine.hint.type).toMatch(/^(play|exchange|pass)$/);
-            expect((await agents[waiting].get(`/room/${id}/game`)).body.hint).toBeNull();
-            expect((await request(app).get(`/room/${id}/game`)).body.hint).toBeNull();
-
-            // The hinted move is legal.
-            if (mine.hint.type === 'play') {
-                const body = {hand_index: mine.hint.hand_index, row: mine.hint.target.row, column: mine.hint.target.column};
-                const played = await agents[current].post(`/room/${id}/game/play`).send(body);
-                expect(played.status).toBe(200);
-                expect(played.body.hint).toBeNull();
-            }
-        });
-
-        test('a standard game never sends a hint', async function () {
-            const id = await started('standard');
-            for (const handle of ['alice', 'bob']) {
-                expect((await agents[handle].get(`/room/${id}/game`)).body.hint).toBeNull();
-            }
-        });
     });
 
     describe('history', function () {
@@ -885,7 +859,7 @@ describe_with_database('rooms and table games', function () {
             const started = await agents.carol.post(`/room/${id}/start`).expect(200);
             expect(started.body.name).toBe('Quiet');
             expect(started.body.settings).toEqual({
-                mode: 'standard', history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
+                history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
                 dead_cards: 'manual', exchanges_per_turn: null,
             });
 

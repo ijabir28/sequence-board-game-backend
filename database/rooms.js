@@ -15,7 +15,6 @@ function team_index(handle, team_count) {
 
 // The settings columns, as {setting: column}. See DEFAULT_SETTINGS in entity/room.js.
 const SETTING_COLUMNS = {
-    mode: 'game_mode',
     history: 'history_enabled',
     highlights: 'highlights_enabled',
     auto_draw_dead: 'auto_draw_dead',
