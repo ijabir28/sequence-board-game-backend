@@ -9,6 +9,7 @@ const router = express.Router();
 router.get('/profile', user.profile);
 router.get('/rooms', user.rooms);
 router.get('/current-game', user.current_game);
+router.get('/leaderboard', user.leaderboard);
 
 // A little over the limit, so an oversized picture gets entity/avatar.js's message rather than the parser's.
 router.put('/avatar', body_parser.raw({type: ACCEPTED_TYPES, limit: AVATAR_MAX_BYTES + 1024}), user.upload_avatar);
