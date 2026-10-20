@@ -48,6 +48,10 @@ async function record_move({room_id, previous, next, handle, move, turn_deadline
                  (SELECT id FROM users WHERE handle = $3), $4, $5, $6, $7, $8, $9, $10)`,
         [rows[0].id, previous.turn, handle, player.team, move.type, card, cell.row, cell.column, JSON.stringify(events), timed_out]
     );
+    // The winning move rates the round for the leaderboard (migration 0017), in the same transaction.
+    if (next.winner !== null && next.winner !== undefined) {
+        await client.query('SELECT record_game_result($1)', [rows[0].id]);
+    }
 }
 
 // Saves a change to the game that isn't a move (a turn pausing or resuming), with the turn's new deadline.

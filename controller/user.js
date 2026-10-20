@@ -1,5 +1,6 @@
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
+const db_leaderboard = require('../database/leaderboard');
 const {UserError, real_email, validate_card_deck, validate_board_style} = require('../entity/user');
 const {check_avatar} = require('../entity/avatar');
 
@@ -142,7 +143,39 @@ async function current_game(req, res) {
     res.send({room: (await db_room.current_for_user({user_id: user.id})) || null});
 }
 
+// The leaderboard, a page at a time. See database/leaderboard.js for how each period ranks players.
+const LEADERBOARD_PER_PAGE = {default: 20, max: 50};
+
+/**
+ * GET /user/leaderboard?period=all|week|day&page=1&per_page=20: one page of the board, best first, with the totals
+ * for paging and `you`, the signed-in player's own entry (null when they aren't on this board), so the page can show
+ * where they stand even when they are further down.
+ */
+async function leaderboard(req, res) {
+    const user = await signed_in_user(req);
+    const period = req.query.period === undefined ? 'all' : String(req.query.period);
+    if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
+        throw new UserError('INVALID_PERIOD', 'The period is all, week or day.');
+    }
+    const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
+    const page = positive_integer(req.query.page, 1);
+    const [board, you] = await Promise.all([
+        db_leaderboard.list({period, limit: per_page, offset: (page - 1) * per_page}),
+        db_leaderboard.entry_for({period, user_id: user.id}),
+    ]);
+    res.send({
+        period,
+        players: board.players,
+        you: you === undefined ? null : Object.assign(you, {page: Math.ceil(you.position / per_page)}),
+        page,
+        per_page,
+        total: board.total,
+        pages: Math.max(1, Math.ceil(board.total / per_page)),
+    });
+}
+
 module.exports = {
+    leaderboard: handler(leaderboard),
     profile: handler(profile),
     upload_avatar: handler(upload_avatar),
     remove_avatar: handler(remove_avatar),
