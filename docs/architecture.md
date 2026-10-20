@@ -75,12 +75,13 @@ database/
                       0005 room names, slug codes and settings, 0006 game mode (dropped in 0016),
                       0007 highlights and history off by default, 0008 turn timer,
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
-                      0016 drops the retired game mode
+                      0016 drops the retired game mode, 0017 leaderboard ratings
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
   rooms.js            Rooms and seats; join() takes a seat under a room lock; list_for_user() for history
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
+  leaderboard.js      The all-time, weekly and daily leaderboards, read from the ratings 0017 keeps
 entity/               Domain layer (tested)
   user.js             Handle and display name rules, scrypt password hashing
   emails.js           Account emails: confirmation, password reset, password changed, already registered,
@@ -132,6 +133,8 @@ the whole server, not one per room.
 | `rooms` | table | Code (`id`, a slug of the name such as `friday-night-k3m9`; older rooms have numeric codes), name, creator, team layout, settings (`history_enabled`, `highlights_enabled`, `auto_draw_dead`, `turn_seconds`), creation time |
 | `room_seats` | taken seat | Primary key (room, team, seat) and unique (room, user): one player per seat, one seat per player. Rows can be removed (standing up, reshuffling) only until the game starts; after that they are the room's history |
 | `games` | round of a room's game | Round number (the highest is the table's current game), full rules state as JSONB (hands and deck included, so only `view_for()` output is ever sent), started / updated / finished time, winning team, the round's statistics once won |
+| `player_ratings` | player with a won round | Elo rating (from 1200), rounds played and won; the all-time leaderboard |
+| `game_results` | player in a won round | Append-only: team, won, rating before and the change; the weekly and daily leaderboards sum these |
 | `turns` | accepted move in a round | Append-only: move number, game turn, player, team, kind, card, cell, and the log events the move produced |
 
 A move is one transaction in `controller/room_game.js`: read the game `FOR UPDATE`, apply the rules
@@ -158,6 +161,14 @@ A table plays its game in rounds. Once a round is won, its statistics (`entity/r
 winning move, and the host deals the next round as a new `games` row with the same teams (seats stay fixed) or ends
 the rounds (`rooms.rounds_ended_at`), after which the GameView carries the final summary of every round. A player's
 profile stats count rounds: each won round is a game played.
+
+The winning move also rates the round for the leaderboard: `record_move()` calls the SQL function
+`record_game_result()` (migration 0017) in the same transaction. It is team Elo with K = 32: a team's rating is its
+players' average, the winner beats each losing team and each loser loses to the winner (with three teams each result
+counts half), and every player of a team moves by the same whole number of points, saved in `game_results`. The
+function ignores a round it already rated, and the migration ran it over every round won before, oldest first.
+`database/leaderboard.js` ranks all time by rating (`player_ratings`, indexed in board order) and the last 7 days /
+24 hours by the rating gained in them; ties share a rank and are ordered by wins, then account age.
 
 Everything a client needs to resume is in these tables: who sat where, the settings, and the full game state.
 After a restart, `GET /user/rooms` lists a player's tables and `GET /room/:id/game` returns the game as it was.

@@ -136,6 +136,17 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
 `200 {room}`: the game in progress where you have a seat that moved most recently (the room as in
 `GET /user/rooms`), or `{room: null}`. For a dashboard's "resume your game". `401 NOT_SIGNED_IN` without a session.
 
+### `GET /user/leaderboard?period=all&page=1&per_page=20` (auth)
+One page of the leaderboard, best first. `period` is `all` (default: everyone with a won round, by Elo rating),
+`week` or `day` (players who finished a round in the last 7 days / 24 hours, by the rating they gained there).
+`per_page` defaults to 20, at most 50. Each player is
+`{rank, position, handle, name, image, score, rating, rating_change, played, won, lost, win_rate}`: `rank` is shared by
+ties, `position` is 1, 2, 3… down the board; `score` is what the board ranks by (`rating` all time, `rating_change`
+otherwise); `rating_change` is the change since 1200 all time; `win_rate` is `won / played` from 0 to 1.
+`200 {period, players, you, page, per_page, total, pages}`, where `you` is the signed-in player's own entry with the
+`page` it is on, or `null` when they aren't on this board. `400 INVALID_PERIOD`, `401 NOT_SIGNED_IN`. Ratings change
+when a round is won; see [architecture](architecture.md#rooms-games-and-history).
+
 ## Room
 
 Rooms, seats, games and every move are stored in PostgreSQL, so tables and games in progress survive restarts.
