@@ -3,6 +3,7 @@ const path = require('path');
 const logger = require('morgan');
 const {ping} = require('./database/pool');
 const {load_session, base_url} = require('./auth');
+const {SERVER_ERROR_MESSAGE} = require('./controller/errors');
 
 
 const  auth_router = require("./routes/auth");
@@ -77,5 +78,23 @@ if (frontend_dist) {
         res.sendFile(path.join(frontend_dist, 'index.html'));
     });
 }
+
+// The last stop for errors no handler answered, such as a request body that isn't valid JSON. Express's own
+// answer is an HTML page with a stack trace outside production; players get a readable JSON message instead.
+// Express spots an error handler by its four parameters, so `next` stays although it is unused.
+app.use(function (err, req, res, next) {
+    if (res.headersSent) {
+        return console.error(err);
+    }
+    const status = err.status || err.statusCode || 500;
+    if (status >= 400 && status < 500) {
+        return res.status(status).send({
+            error: 'BAD_REQUEST',
+            message: "That request couldn't be understood. Please refresh the page and try again.",
+        });
+    }
+    console.error(err);
+    res.status(500).send({error: 'SERVER_ERROR', message: SERVER_ERROR_MESSAGE});
+});
 
 module.exports = app;

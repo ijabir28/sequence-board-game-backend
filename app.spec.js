@@ -93,3 +93,17 @@ describe('old addresses', function () {
         expect(response.status).toBe(404);
     });
 });
+
+describe('unhandled errors', function () {
+    const app = require('./app');
+
+    test('answers a malformed JSON body with a readable message, not a stack trace', async function () {
+        const response = await request(app).post('/room/create').set('Content-Type', 'application/json').send('{not json');
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+            error: 'BAD_REQUEST',
+            message: "That request couldn't be understood. Please refresh the page and try again.",
+        });
+        expect(response.text).not.toMatch(/at \S+ \(/);
+    });
+});

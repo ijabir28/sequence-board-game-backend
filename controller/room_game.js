@@ -1,3 +1,4 @@
+const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_room = require('../database/rooms');
 const db_game = require('../database/games');
 const {transaction} = require('../database/pool');
@@ -39,7 +40,7 @@ function send_error(res, e) {
         return res.status(STATUS_BY_ERROR[e.code] || 400).send({error: e.code, message: e.message});
     }
     console.error(e);
-    res.status(500).send({error: 'SERVER_ERROR', message: 'Something went wrong on the server.'});
+    res.status(500).send({error: 'SERVER_ERROR', message: SERVER_ERROR_MESSAGE});
 }
 
 async function find_room(id, client) {
