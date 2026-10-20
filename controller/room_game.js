@@ -533,8 +533,11 @@ function start_turn_timer({interval_ms = 1000} = {}) {
     return every(interval_ms, expire_overdue_turns, 'Turn timer');
 }
 
-/** Lets the bots move, checking every `interval_ms`. Started by bin/www, like the turn timer. Returns a stopper. */
-function start_bot_players({interval_ms = 500} = {}) {
+/**
+ * Lets the bots move, checking every `interval_ms` (a query each time, so no more often than the turn timer). Started
+ * by bin/www, like the turn timer. Returns a stopper.
+ */
+function start_bot_players({interval_ms = 1000} = {}) {
     return every(interval_ms, play_bot_turns, 'Bot player');
 }
 
