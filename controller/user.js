@@ -85,7 +85,7 @@ async function remove_avatar(req, res) {
 async function avatar(req, res) {
     const found = await db_user.get_avatar({user_id: req.params.id});
     if (found === undefined) {
-        return res.status(404).send({error: 'NOT_FOUND', message: 'No such picture.'});
+        return res.status(404).send({error: 'NOT_FOUND', message: "We couldn't find that picture."});
     }
     res.set({
         'Content-Type': found.content_type,
@@ -156,7 +156,7 @@ async function leaderboard(req, res) {
     const user = await signed_in_user(req);
     const period = req.query.period === undefined ? 'all' : String(req.query.period);
     if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
-        throw new UserError('INVALID_PERIOD', 'The period is all, week or day.');
+        throw new UserError('INVALID_PERIOD', 'Choose a leaderboard period: all time, this week or today.');
     }
     const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
     const page = positive_integer(req.query.page, 1);

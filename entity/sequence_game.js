@@ -327,7 +327,7 @@ function apply_move(state, handle, move, random = Math.random) {
             }), random);
         }
         default:
-            throw new RuleError('UNKNOWN_MOVE', 'Unknown move.');
+            throw new RuleError('UNKNOWN_MOVE', "That move isn't recognised. Please try again.");
     }
 }
 
