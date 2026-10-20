@@ -1,3 +1,4 @@
+const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
 const db_leaderboard = require('../database/leaderboard');
@@ -18,7 +19,7 @@ function send_error(res, e) {
         return res.status(STATUS_BY_ERROR[e.code] || 400).send({error: e.code, message: e.message});
     }
     console.error(e);
-    res.status(500).send({error: 'SERVER_ERROR', message: 'Something went wrong on the server.'});
+    res.status(500).send({error: 'SERVER_ERROR', message: SERVER_ERROR_MESSAGE});
 }
 
 // Express 4 doesn't catch rejected promises, so async handlers report their own errors.
@@ -84,7 +85,7 @@ async function remove_avatar(req, res) {
 async function avatar(req, res) {
     const found = await db_user.get_avatar({user_id: req.params.id});
     if (found === undefined) {
-        return res.status(404).send({error: 'NOT_FOUND', message: 'No such picture.'});
+        return res.status(404).send({error: 'NOT_FOUND', message: "We couldn't find that picture."});
     }
     res.set({
         'Content-Type': found.content_type,
@@ -155,7 +156,7 @@ async function leaderboard(req, res) {
     const user = await signed_in_user(req);
     const period = req.query.period === undefined ? 'all' : String(req.query.period);
     if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
-        throw new UserError('INVALID_PERIOD', 'The period is all, week or day.');
+        throw new UserError('INVALID_PERIOD', 'Choose a leaderboard period: all time, this week or today.');
     }
     const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
     const page = positive_integer(req.query.page, 1);
