@@ -64,4 +64,13 @@ async function set_board_style({user_id, board_style}) {
     await pool.query('UPDATE users SET board_style = $2, updated_at = now() WHERE id = $1', [user_id, board_style]);
 }
 
-module.exports = {get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style};
+/** `count` different bots, picked at random: [{user_id, handle, name}]. Bots are made by migration 0018. */
+async function random_bots({count, client = pool}) {
+    const {rows} = await client.query(
+        'SELECT id AS user_id, handle, name FROM users WHERE is_bot ORDER BY random() LIMIT $1',
+        [count]
+    );
+    return rows;
+}
+
+module.exports = {random_bots, get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style};

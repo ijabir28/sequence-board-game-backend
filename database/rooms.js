@@ -40,8 +40,9 @@ function read_settings(row) {
 const UNIQUE_VIOLATION = '23505';
 
 // Inserts the room with the first free code `make_id()` gives (codes are random, so a clash is rare).
-// Returns the code. Not for use inside a transaction: a clash aborts it.
-async function create({make_id, name, administrator_id, team_count, players_per_team, settings, client = pool, attempts = 5}) {
+// Returns the code. Not for use inside a transaction: a clash aborts it. `matchmaking` marks a table the matchmaking
+// queue made (controller/matchmaking.js).
+async function create({make_id, name, administrator_id, team_count, players_per_team, settings, matchmaking = false, client = pool, attempts = 5}) {
     const columns = Object.values(SETTING_COLUMNS);
     const values = Object.keys(SETTING_COLUMNS).map(function (key) {
         return settings[key];
@@ -50,11 +51,11 @@ async function create({make_id, name, administrator_id, team_count, players_per_
         const id = make_id();
         try {
             await client.query(
-                `INSERT INTO rooms (id, name, administrator_id, team_count, players_per_team, ${columns.join(', ')})
-                 VALUES ($1, $2, $3, $4, $5, ${columns.map(function (_, i) {
-                    return `$${i + 6}`;
+                `INSERT INTO rooms (id, name, administrator_id, team_count, players_per_team, matchmaking, ${columns.join(', ')})
+                 VALUES ($1, $2, $3, $4, $5, $6, ${columns.map(function (_, i) {
+                    return `$${i + 7}`;
                 }).join(', ')})`,
-                [id, name, administrator_id, team_count, players_per_team].concat(values)
+                [id, name, administrator_id, team_count, players_per_team, matchmaking].concat(values)
             );
             return id;
         } catch (e) {
@@ -77,15 +78,15 @@ async function update({id, name, settings, client = pool}) {
     );
 }
 
-// {id, name, administrator, administrator_name, team_count, players_per_team, created_at, rounds_ended_at,
+// {id, name, administrator, administrator_name, team_count, players_per_team, created_at, rounds_ended_at, matchmaking,
 //  settings: {mode, history, highlights, auto_draw_dead, turn_seconds, dead_cards, exchanges_per_turn},
-//  teams: [{handle, players: [{handle, name} | null]}]} or undefined. `lock` holds the room row until the
+//  teams: [{handle, players: [{handle, name, bot?} | null]}]} or undefined. `bot` is only there (true) for a bot. `lock` holds the room row until the
 // transaction ends, which serialises joins, starts and settings changes.
 async function get({id, client = pool, lock = false}) {
     const {rows} = await client.query(
         `SELECT rooms.id, rooms.name, users.handle AS administrator, users.name AS administrator_name,
                 rooms.team_count, rooms.players_per_team,
-                rooms.created_at, rooms.rounds_ended_at, ${SETTINGS_SELECT}
+                rooms.created_at, rooms.rounds_ended_at, rooms.matchmaking, ${SETTINGS_SELECT}
          FROM rooms JOIN users ON users.id = rooms.administrator_id
          WHERE rooms.id = $1 ${lock ? 'FOR UPDATE OF rooms' : ''}`,
         [String(id)]
@@ -96,7 +97,7 @@ async function get({id, client = pool, lock = false}) {
     }
     read_settings(room);
     const seats = await client.query(
-        `SELECT room_seats.team, room_seats.seat, room_seats.user_id, users.handle, users.name
+        `SELECT room_seats.team, room_seats.seat, room_seats.user_id, users.handle, users.name, users.is_bot
          FROM room_seats JOIN users ON users.id = room_seats.user_id
          WHERE room_seats.room_id = $1`,
         [room.id]
@@ -106,8 +107,8 @@ async function get({id, client = pool, lock = false}) {
     });
     // user_id stays on the room (for reseating) and out of the payload.
     room.seated_user_ids = {};
-    seats.rows.forEach(function ({team, seat, user_id, handle, name}) {
-        room.teams[team].players[seat] = {handle, name};
+    seats.rows.forEach(function ({team, seat, user_id, handle, name, is_bot}) {
+        room.teams[team].players[seat] = is_bot ? {handle, name, bot: true} : {handle, name};
         room.seated_user_ids[handle] = user_id;
     });
     return room;
@@ -180,7 +181,7 @@ const USER_ROOMS_SELECT = `
                     ELSE 'finished' END AS status,
                games.started_at, games.updated_at AS last_move_at, games.finished_at, games.winner_team,
                (SELECT count(*)::INT FROM turns WHERE turns.game_id = games.id) AS move_count,
-               games.round, rooms.rounds_ended_at IS NOT NULL AS rounds_over
+               games.round, rooms.rounds_ended_at IS NOT NULL AS rounds_over, rooms.matchmaking
         FROM rooms
         JOIN users AS administrators ON administrators.id = rooms.administrator_id
         LEFT JOIN room_seats AS my_seat ON my_seat.room_id = rooms.id AND my_seat.user_id = $1
@@ -230,4 +231,22 @@ async function current_for_user({user_id, client = pool}) {
     return rows[0] === undefined ? undefined : read_settings(rows[0]);
 }
 
-module.exports = {create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user};
+// The matchmaking game in progress at which the user has a seat, or undefined: one at a time, so the queue sends
+// them back to it rather than into another.
+async function current_match_for_user({user_id, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT rooms.id FROM rooms
+         JOIN room_seats ON room_seats.room_id = rooms.id AND room_seats.user_id = $1
+         JOIN games ON games.room_id = rooms.id
+         WHERE rooms.matchmaking AND games.finished_at IS NULL
+         ORDER BY rooms.created_at DESC
+         LIMIT 1`,
+        [user_id]
+    );
+    return rows[0] === undefined ? undefined : rows[0].id;
+}
+
+module.exports = {
+    create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
+    current_match_for_user,
+};

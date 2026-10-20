@@ -48,9 +48,10 @@ async function record_move({room_id, previous, next, handle, move, turn_deadline
                  (SELECT id FROM users WHERE handle = $3), $4, $5, $6, $7, $8, $9, $10)`,
         [rows[0].id, previous.turn, handle, player.team, move.type, card, cell.row, cell.column, JSON.stringify(events), timed_out]
     );
-    // The winning move rates the round for the leaderboard (migration 0017), in the same transaction.
+    // The winning move rates the round for its leaderboard (migrations 0017 and 0018: a matchmaking table has its own),
+    // in the same transaction.
     if (next.winner !== null && next.winner !== undefined) {
-        await client.query('SELECT record_game_result($1)', [rows[0].id]);
+        await client.query('SELECT rate_round($1)', [rows[0].id]);
     }
 }
 
@@ -83,6 +84,22 @@ async function overdue({now = new Date(), client = pool} = {}) {
     const {rows} = await client.query(
         `SELECT room_id FROM games WHERE finished_at IS NULL AND turn_deadline <= $1 ORDER BY turn_deadline`,
         [now]
+    );
+    return rows.map(function (row) {
+        return row.room_id;
+    });
+}
+
+// Games in progress where a bot is to move and its turn started at or before `started_before` (so it seems to think
+// first), oldest turn first: [room_id].
+async function bot_turns({started_before = new Date(), client = pool} = {}) {
+    const {rows} = await client.query(
+        `SELECT room_id FROM games
+         WHERE finished_at IS NULL
+           AND (state -> 'players' -> (state ->> 'current')::INT ->> 'bot') = 'true'
+           AND (state ->> 'turn_started_at')::TIMESTAMPTZ <= $1
+         ORDER BY state ->> 'turn_started_at'`,
+        [started_before]
     );
     return rows.map(function (row) {
         return row.room_id;
@@ -137,4 +154,4 @@ async function list_turns({room_id, client = pool}) {
     });
 }
 
-module.exports = {get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, get_deadline};
+module.exports = {get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, bot_turns, get_deadline};
