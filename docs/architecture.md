@@ -63,7 +63,8 @@ controller/
   user.js             profile and stats, avatars, the user's rooms and current game (JSON errors)
   room.js             create / get / join room, change its settings (host only), broadcasts room_updated
   room_game.js        start a table's game, view it, play / exchange / pass; broadcasts game_updated; turn timer,
-                      pauses the turn of a player who is away from the table
+                      pauses the turn of a player who is away from the table; plays the bots' turns
+  matchmaking.js      The Quick Match queue (in memory): seats matched players, with bots after a 2 minute wait
   presence.js         In memory: which seated players have their table's game open (signed socket tokens)
   board.js            serves data/board_deck.json (module singleton, also used as live board state)
   game.js             LEGACY global game: 4 hard-coded players, deal on module load, play endpoint
@@ -75,13 +76,15 @@ database/
                       0005 room names, slug codes and settings, 0006 game mode (dropped in 0016),
                       0007 highlights and history off by default, 0008 turn timer,
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
-                      0016 drops the retired game mode, 0017 leaderboard ratings
+                      0016 drops the retired game mode, 0017 leaderboard ratings, 0018 bots, matchmaking
+                      tables and their leaderboard
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
   rooms.js            Rooms and seats; join() takes a seat under a room lock; list_for_user() for history
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
-  leaderboard.js      The all-time, weekly and daily leaderboards, read from the ratings 0017 keeps
+  leaderboard.js      The all-time, weekly and daily leaderboards, read from the ratings 0017 keeps (or, for
+                      Quick Match, 0018)
 entity/               Domain layer (tested)
   user.js             Handle and display name rules, scrypt password hashing
   emails.js           Account emails: confirmation, password reset, password changed, already registered,
@@ -90,6 +93,8 @@ entity/               Domain layer (tested)
   room.js             Room names, slug codes and settings (defaults and parsing)
   rounds.js           A round's statistics from its final state, and the final summary and verdict of all rounds
   sequence_game.js    Full rules for table games: dealing, turns, jacks, dead cards, sequences, win. Wired to HTTP
+  bot.js              The bot's move: one move ahead, scored by the board's 5-cell windows
+  matchmaking.js      The Quick Match queue's rules: table shapes, matching, the bot timeout, stale entries
   board.js            New_board(): get_deck, play, pretty_deck; move validation
   players.js          create_players({teams}): seating order, hands, team/player count validation
   game.js             initialize_game({teams}): board + players + shuffled deck + deal
@@ -135,6 +140,7 @@ the whole server, not one per room.
 | `games` | round of a room's game | Round number (the highest is the table's current game), full rules state as JSONB (hands and deck included, so only `view_for()` output is ever sent), started / updated / finished time, winning team, the round's statistics once won |
 | `player_ratings` | player with a won round | Elo rating (from 1200), rounds played and won; the all-time leaderboard |
 | `game_results` | player in a won round | Append-only: team, won, rating before and the change; the weekly and daily leaderboards sum these |
+| `matchmaking_ratings`, `matchmaking_results` | as the two above, for Quick Match rounds | The Quick Match leaderboard, kept apart |
 | `turns` | accepted move in a round | Append-only: move number, game turn, player, team, kind, card, cell, and the log events the move produced |
 
 A move is one transaction in `controller/room_game.js`: read the game `FOR UPDATE`, apply the rules
@@ -175,6 +181,34 @@ After a restart, `GET /user/rooms` lists a player's tables and `GET /room/:id/ga
 
 The game state also carries its own `log`, which the GameView shows; `turns` is the queryable history of the same
 moves, keyed to user ids rather than display names.
+
+## Quick Match and bots
+
+`controller/matchmaking.js` keeps one queue per table shape: 2 or 3 teams of one player (so nobody shares a team with
+a stranger) and a turn timer (blitz 15 s, medium 45 s, slow 90 s); everything else is a new table's default. When as
+many players as teams wait for the same shape, the oldest are matched; once the oldest has waited two minutes, they
+are matched with whoever else waits and bots take the other seats (`entity/matchmaking.js`). The queue lives in memory
+(one server), so a restart empties it, and waiting pages check in every few seconds: an entry not seen for 30 seconds
+is dropped, so nobody is seated at a game they've closed. A player with a quick match in progress is sent back to it
+rather than queued.
+
+A match is an ordinary room with `rooms.matchmaking` set: seated in random team order and dealt at once, by
+`deal_first_round()` in `controller/room_game.js`. It differs from a private table in three ways. Its turns never pause
+for an absent player (the timer plays for them), the first turn has 10 seconds' grace for everyone to open the game,
+and it plays a single round: the winning move ends the rounds. Its won round is rated by `rate_round()` (0018) into
+`matchmaking_ratings` / `matchmaking_results` rather than the private tables' leaderboard, so the two never affect each
+other.
+
+Bots are accounts (`users.is_bot`, made by 0018) with no password, `bot-` handles that sign-up can't produce and
+`@bots.invalid` emails that are never sent anything. A seated bot is marked `bot: true` in the game state.
+`start_bot_players()` (started by `bin/www`, like the turn timer) looks for games where a bot is to move and its turn
+began 1.5 seconds ago, and plays its whole turn in the same locked transaction a player's move uses. The move comes from
+`entity/bot.js`: every card on every legal cell, scored by the board's 5-cell windows, where a window still open to a
+team is worth more the more of its cells the team holds (one short of a winning sequence most of all). A move scores
+what it adds to the bot's windows plus what it takes from every opponent's, with bonuses for completing a sequence and
+for winning. Jacks have a cost, so wild jacks are saved for completing or blocking lines and one-eyed jacks for breaking
+an opponent's near-sequence; a dead card is exchanged first. Bots are rated on the Quick Match leaderboard, so beating
+one counts, but they are never listed.
 
 ## Accounts and sessions
 
