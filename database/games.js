@@ -55,6 +55,37 @@ async function record_move({room_id, previous, next, handle, move, turn_deadline
     }
 }
 
+// Ends the round without a move: a player forfeited a two-team quick match, so `state` has the other team as its
+// winner. Saves the state and the round's statistics and rates it, like a winning move.
+async function finish({room_id, state, stats = null, client}) {
+    const {rows} = await client.query(
+        `UPDATE games SET state = $2, updated_at = now(), winner_team = $3, finished_at = now(), turn_deadline = NULL, stats = $5
+         WHERE room_id = $1 AND round = $4
+         RETURNING id`,
+        [String(room_id), state, state.winner, state.round || 1, stats]
+    );
+    await client.query('SELECT rate_round($1)', [rows[0].id]);
+}
+
+// A quick match player forfeited a three-team game: they lose rating now (migration 0019).
+async function rate_forfeit({room_id, user_id, client}) {
+    await client.query('SELECT record_matchmaking_forfeit($1, $2)', [await round_id({room_id, client}), user_id]);
+}
+
+// Marks a player's loss in the round just rated as a forfeit (two-team games, where the round is rated as usual).
+async function mark_forfeit({room_id, user_id, client}) {
+    await client.query(
+        'UPDATE matchmaking_results SET forfeit = true WHERE game_id = $1 AND user_id = $2',
+        [await round_id({room_id, client}), user_id]
+    );
+}
+
+// The id of the table's current round (a row of `games`).
+async function round_id({room_id, client = pool}) {
+    const {rows} = await client.query('SELECT id FROM games WHERE room_id = $1 ORDER BY round DESC LIMIT 1', [String(room_id)]);
+    return rows[0].id;
+}
+
 // Saves a change to the game that isn't a move (a turn pausing or resuming), with the turn's new deadline.
 async function save_state({room_id, state, turn_deadline = null, client = pool}) {
     await client.query(
@@ -154,4 +185,4 @@ async function list_turns({room_id, client = pool}) {
     });
 }
 
-module.exports = {get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, bot_turns, get_deadline};
+module.exports = {finish, round_id, rate_forfeit, mark_forfeit, get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, bot_turns, get_deadline};

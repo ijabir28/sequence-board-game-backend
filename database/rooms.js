@@ -223,7 +223,7 @@ async function list_for_user({user_id, limit = 50, offset = 0, client = pool}) {
 async function current_for_user({user_id, client = pool}) {
     const {rows} = await client.query(
         `${USER_ROOMS_SELECT}
-         WHERE my_seat.user_id IS NOT NULL AND games.id IS NOT NULL AND games.finished_at IS NULL
+         WHERE my_seat.user_id IS NOT NULL AND my_seat.forfeited_at IS NULL AND games.id IS NOT NULL AND games.finished_at IS NULL
          ORDER BY games.updated_at DESC, rooms.id
          LIMIT 1`,
         [user_id]
@@ -231,12 +231,12 @@ async function current_for_user({user_id, client = pool}) {
     return rows[0] === undefined ? undefined : read_settings(rows[0]);
 }
 
-// The matchmaking game in progress at which the user has a seat, or undefined: one at a time, so the queue sends
-// them back to it rather than into another.
+// The matchmaking game in progress at which the user has a seat (and hasn't forfeited), or undefined: one at a time,
+// so the queue sends them back to it rather than into another.
 async function current_match_for_user({user_id, client = pool}) {
     const {rows} = await client.query(
         `SELECT rooms.id FROM rooms
-         JOIN room_seats ON room_seats.room_id = rooms.id AND room_seats.user_id = $1
+         JOIN room_seats ON room_seats.room_id = rooms.id AND room_seats.user_id = $1 AND room_seats.forfeited_at IS NULL
          JOIN games ON games.room_id = rooms.id
          WHERE rooms.matchmaking AND games.finished_at IS NULL
          ORDER BY rooms.created_at DESC
@@ -246,7 +246,13 @@ async function current_match_for_user({user_id, client = pool}) {
     return rows[0] === undefined ? undefined : rows[0].id;
 }
 
+// The player forfeited their seat at a quick match. Call inside the transaction that locked the game.
+async function forfeit_seat({id, user_id, client}) {
+    await client.query('UPDATE room_seats SET forfeited_at = now() WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+}
+
 module.exports = {
+    forfeit_seat,
     create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
     current_match_for_user,
 };
