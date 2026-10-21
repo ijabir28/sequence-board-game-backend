@@ -77,7 +77,7 @@ database/
                       0007 highlights and history off by default, 0008 turn timer,
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
                       0016 drops the retired game mode, 0017 leaderboard ratings, 0018 bots, matchmaking
-                      tables and their leaderboard
+                      tables and their leaderboard, 0019 bot names, 0020 quick match forfeits
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
@@ -199,16 +199,26 @@ and it plays a single round: the winning move ends the rounds. Its won round is 
 `matchmaking_ratings` / `matchmaking_results` rather than the private tables' leaderboard, so the two never affect each
 other.
 
-Bots are accounts (`users.is_bot`, made by 0018) with no password, `bot-` handles that sign-up can't produce and
-`@bots.invalid` emails that are never sent anything. A seated bot is marked `bot: true` in the game state.
-`start_bot_players()` (started by `bin/www`, like the turn timer) looks for games where a bot is to move and its turn
-began 1.5 seconds ago, and plays its whole turn in the same locked transaction a player's move uses. The move comes from
+Bots are accounts (`users.is_bot`, made by 0018) with no password and `@bots.invalid` emails that are never sent
+anything. They pass for players: 0019 gave them everyday names and handles, and nothing a client is sent marks a seat
+as a bot's (game views, room payloads and `match_found` treat every seat alike, and the queue status doesn't say when
+bots would come). A seated bot is marked `bot: true` in the stored game state only. `start_bot_players()` (started by
+`bin/www`, like the turn timer) looks for games where a bot is to move and, once it has "thought" for 1.5 to 7
+seconds (varied each turn), plays its whole turn in the same locked transaction a player's move uses. The move comes from
 `entity/bot.js`: every card on every legal cell, scored by the board's 5-cell windows, where a window still open to a
 team is worth more the more of its cells the team holds (one short of a winning sequence most of all). A move scores
 what it adds to the bot's windows plus what it takes from every opponent's, with bonuses for completing a sequence and
 for winning. Jacks have a cost, so wild jacks are saved for completing or blocking lines and one-eyed jacks for breaking
 an opponent's near-sequence; a dead card is exchanged first. Bots are rated on the Quick Match leaderboard, so beating
 one counts, but they are never listed.
+
+A quick match player may forfeit (`POST /room/:id/game/forfeit`), and does automatically after the timer has played
+for them 10 turns in a row (`missed` in the state counts them; a move of their own resets it). The seat gets
+`room_seats.forfeited_at` (0020) and the handle goes into the state's `forfeited`. With two teams the other team wins
+at once and the round is rated as usual. With three, `record_matchmaking_forfeit()` takes the forfeiter's rating loss
+at once, and a free bot plays the seat on under the forfeiter's name (`played_by` in the state; its moves are its own in
+`turns`). `record_matchmaking_result()` then rates nobody if that seat wins, and otherwise leaves out whoever was
+already rated by a forfeit.
 
 ## Accounts and sessions
 
