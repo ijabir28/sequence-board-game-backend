@@ -48,10 +48,42 @@ async function record_move({room_id, previous, next, handle, move, turn_deadline
                  (SELECT id FROM users WHERE handle = $3), $4, $5, $6, $7, $8, $9, $10)`,
         [rows[0].id, previous.turn, handle, player.team, move.type, card, cell.row, cell.column, JSON.stringify(events), timed_out]
     );
-    // The winning move rates the round for the leaderboard (migration 0017), in the same transaction.
+    // The winning move rates the round for its leaderboard (migrations 0017 and 0018: a matchmaking table has its own),
+    // in the same transaction.
     if (next.winner !== null && next.winner !== undefined) {
-        await client.query('SELECT record_game_result($1)', [rows[0].id]);
+        await client.query('SELECT rate_round($1)', [rows[0].id]);
     }
+}
+
+// Ends the round without a move: a player forfeited a two-team quick match, so `state` has the other team as its
+// winner. Saves the state and the round's statistics and rates it, like a winning move.
+async function finish({room_id, state, stats = null, client}) {
+    const {rows} = await client.query(
+        `UPDATE games SET state = $2, updated_at = now(), winner_team = $3, finished_at = now(), turn_deadline = NULL, stats = $5
+         WHERE room_id = $1 AND round = $4
+         RETURNING id`,
+        [String(room_id), state, state.winner, state.round || 1, stats]
+    );
+    await client.query('SELECT rate_round($1)', [rows[0].id]);
+}
+
+// A quick match player forfeited a three-team game: they lose rating now (migration 0019).
+async function rate_forfeit({room_id, user_id, client}) {
+    await client.query('SELECT record_matchmaking_forfeit($1, $2)', [await round_id({room_id, client}), user_id]);
+}
+
+// Marks a player's loss in the round just rated as a forfeit (two-team games, where the round is rated as usual).
+async function mark_forfeit({room_id, user_id, client}) {
+    await client.query(
+        'UPDATE matchmaking_results SET forfeit = true WHERE game_id = $1 AND user_id = $2',
+        [await round_id({room_id, client}), user_id]
+    );
+}
+
+// The id of the table's current round (a row of `games`).
+async function round_id({room_id, client = pool}) {
+    const {rows} = await client.query('SELECT id FROM games WHERE room_id = $1 ORDER BY round DESC LIMIT 1', [String(room_id)]);
+    return rows[0].id;
 }
 
 // Saves a change to the game that isn't a move (a turn pausing or resuming), with the turn's new deadline.
@@ -83,6 +115,22 @@ async function overdue({now = new Date(), client = pool} = {}) {
     const {rows} = await client.query(
         `SELECT room_id FROM games WHERE finished_at IS NULL AND turn_deadline <= $1 ORDER BY turn_deadline`,
         [now]
+    );
+    return rows.map(function (row) {
+        return row.room_id;
+    });
+}
+
+// Games in progress where a bot is to move and its turn started at or before `started_before` (so it seems to think
+// first), oldest turn first: [room_id].
+async function bot_turns({started_before = new Date(), client = pool} = {}) {
+    const {rows} = await client.query(
+        `SELECT room_id FROM games
+         WHERE finished_at IS NULL
+           AND (state -> 'players' -> (state ->> 'current')::INT ->> 'bot') = 'true'
+           AND (state ->> 'turn_started_at')::TIMESTAMPTZ <= $1
+         ORDER BY state ->> 'turn_started_at'`,
+        [started_before]
     );
     return rows.map(function (row) {
         return row.room_id;
@@ -137,4 +185,4 @@ async function list_turns({room_id, client = pool}) {
     });
 }
 
-module.exports = {get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, get_deadline};
+module.exports = {finish, round_id, rate_forfeit, mark_forfeit, get, get_round, create, record_move, save_state, save_stats, list_rounds, list_turns, overdue, bot_turns, get_deadline};

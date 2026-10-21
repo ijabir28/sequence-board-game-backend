@@ -14,6 +14,8 @@ const PASSWORD_MAX_LENGTH = 200;
 // Accounts made before emails were asked for have `<handle>@no-email.invalid` (migration 0011). The reserved
 // `.invalid` domain can't receive mail, so these are treated as having no email at all.
 const PLACEHOLDER_EMAIL_DOMAIN = '@no-email.invalid';
+// Bots (migration 0018) have addresses on `.invalid` too: they have no inbox either.
+const BOT_EMAIL_DOMAIN = '@bots.invalid';
 
 // scrypt cost parameters. They are stored in every hash, so they can be raised later without breaking
 // existing accounts. N = 2^15 needs 32 MiB, just over Node's default limit, hence MAX_MEMORY.
@@ -60,9 +62,9 @@ function validate_name(name) {
     return {name: clean_name};
 }
 
-/** The user's email, or null for the placeholder of an account that has none yet. */
+/** The user's email, or null for the placeholder of an account that has none yet (or a bot's). */
 function real_email(email) {
-    return typeof email === 'string' && !email.endsWith(PLACEHOLDER_EMAIL_DOMAIN) ? email : null;
+    return typeof email === 'string' && !email.endsWith(PLACEHOLDER_EMAIL_DOMAIN) && !email.endsWith(BOT_EMAIL_DOMAIN) ? email : null;
 }
 
 async function hash_password(password, {N, r, p} = SCRYPT) {

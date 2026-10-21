@@ -7,7 +7,8 @@ const app = require('../app');
 const {socket} = require('../socket');
 const {with_direct_pool} = require('../database/pool');
 const {migrate} = require('../database/migrate');
-const {start_turn_timer, presence_changed} = require('../controller/room_game');
+const {start_turn_timer, start_bot_players, presence_changed} = require('../controller/room_game');
+const {start_matchmaking} = require('../controller/matchmaking');
 const presence = require('../controller/presence');
 const debug = require('debug')('sequence-board-game:server');
 const http = require('http');
@@ -35,6 +36,9 @@ with_direct_pool(function (pool) {
     .then(function () {
         // Plays a random card for anyone whose turn timer runs out, including games resumed after a restart.
         start_turn_timer();
+        // Bots move at their tables, and the Quick Match queue seats players (with bots after two minutes' wait).
+        start_bot_players();
+        start_matchmaking();
         // A player leaving or coming back to their table pauses or resumes their turn.
         presence.on_change(function (room_id) {
             presence_changed(room_id).catch(function (e) {

@@ -145,7 +145,41 @@ ties, `position` is 1, 2, 3… down the board; `score` is what the board ranks b
 otherwise); `rating_change` is the change since 1200 all time; `win_rate` is `won / played` from 0 to 1.
 `200 {period, players, you, page, per_page, total, pages}`, where `you` is the signed-in player's own entry with the
 `page` it is on, or `null` when they aren't on this board. `400 INVALID_PERIOD`, `401 NOT_SIGNED_IN`. Ratings change
-when a round is won; see [architecture](architecture.md#rooms-games-and-history).
+when a round is won; see [architecture](architecture.md#rooms-games-and-history). This board only counts private
+tables; Quick Match has its own, [`GET /matchmaking/leaderboard`](#get-matchmakingleaderboardperiodallpage1per_page20-auth).
+
+## Quick Match
+
+Players queue for a table shape and the server seats them with others who asked for the same. See
+[architecture](architecture.md#quick-match-and-bots).
+
+### `POST /matchmaking/queue {teams, timer}` (auth)
+Joins the queue. `teams` is `2` or `3` (always one player per team); `timer` is `blitz` (15 s turns), `medium` (45 s)
+or `slow` (90 s). Every other setting is the default of a new table. Asking again with another shape moves the player
+to that queue (keeping their place only for the same shape). Answers `200` with the status (below): `matched` at once
+when enough players were waiting, else `queued`; `playing` (and not queued) when the player already has a quick match in
+progress, which they should go back to. `400 INVALID_MATCH_SETTINGS`, `401 NOT_SIGNED_IN`.
+
+### `GET /matchmaking/queue` (auth)
+The status. A waiting page must call it every few seconds: a player not heard from for 30 seconds has left the queue.
+
+```jsonc
+{"status": "queued", "teams": 2, "timer": "blitz", "turn_seconds": 15,
+ "joined_at": "…",                  // nothing says when bots would be brought in, or who else waits
+ "server_time": "…"}
+{"status": "matching"}               // the table is being made: ask again
+{"status": "matched", "room_id": "quick-match-k3m9"}   // seated (kept for 5 minutes): open /room/:id/game
+{"status": "playing", "room_id": "quick-match-k3m9"}   // a quick match of theirs is in progress
+{"status": "idle"}
+```
+
+### `DELETE /matchmaking/queue` (auth)
+Leaves the queue. `200` with the status (`idle`, or `playing`).
+
+### `GET /matchmaking/leaderboard?period=all&page=1&per_page=20` (auth)
+The Quick Match leaderboard, exactly like [`GET /user/leaderboard`](#get-userleaderboardperiodallpage1per_page20-auth)
+but over quick matches only, with ratings of its own (from 1200). Bots are rated, so beating one counts, but are never
+listed.
 
 ## Room
 
@@ -255,7 +289,7 @@ The GameView for the session's user. Anyone may watch; only seated players see a
 // GameView
 {
   "team_count": 2, "sequences_to_win": 2,
-  "players": [{"handle": "jabir", "name": "Jabir ibne kamal", "team": 0, "hand_count": 7}, …],
+  "players": [{"handle": "jabir", "name": "Jabir ibne kamal", "team": 0, "hand_count": 7}, …],   // a bot's seat looks like anyone's
   "current_player": "jabir",          // null once the game is won
   "turn": 1,
   "board": [[{"name": "Blank", "team": null}, {"name": "6-Diamond", "team": 0}, …], …],   // 10×10, team is 0|1|2|null
@@ -268,6 +302,8 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "winner": null,
   "name": "Friday Night",            // the room's name
   "host": "jabir",                   // the host's handle: they deal each round and decide whether another follows
+  "matchmaking": false,              // a Quick Match table: one round, which ends the rounds when won
+  "forfeited": false,                // the viewer forfeited this quick match: they see it as a spectator
   "rounds": {…},                     // the table's rounds, see below
   "turn_started_at": "2026-10-15T06:55:15.349Z",   // when the current turn began (null for games stored before)
   "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over or while paused)
@@ -320,6 +356,21 @@ When the current player is away, their turn is **paused**: `turn_deadline` is nu
 on from exactly where it stopped (the time spent away doesn't count, and there is no minimum). A turn that starts while its player is away (the first turn,
 before anyone has opened the game, for example) starts paused. Presence is kept in memory, so after a restart everyone
 is away until their page reconnects, which it does by itself. Every arrival and departure broadcasts `game_updated`.
+
+Quick Match tables are the exception: their players are strangers, so a turn never pauses (an absent player's turns
+are played for them when the timer runs out), and the first turn gets 10 extra seconds for everyone to open the game.
+Bots are never away; the server plays a bot's turn 1.5 to 7 seconds after it starts (it varies, as a person's would).
+A quick match player whose timer plays for them 10 turns in a row forfeits (below); a move of their own resets the
+count, kept in the state as `missed`.
+
+### `POST /room/:id/game/forfeit` (auth) — quick matches only
+The signed-in player gives up. With two teams the other team wins at once (the log gets a `forfeit` entry, then the
+`win`) and the round is rated as usual, the forfeiter's loss marked `forfeit` in `matchmaking_results`. With three
+teams the forfeiter loses rating at once (a loss to each other team, each counting half) and a bot plays the rest of
+the game from their seat, under their name, with nothing in any view to say so; if that seat wins, nobody is rated,
+and if a person wins, the round is rated as usual without the forfeiter. Either way the forfeiter's GameView has
+`forfeited: true` and no hand, and they may queue again. `200` with that view; `409 FORFEITED` (already),
+`409 NOT_A_QUICK_MATCH`, `409 GAME_OVER`, `403 NOT_A_PLAYER`.
 
 ### `POST /room/:id/game/play` (auth) — body `{hand_index, row, column}`
 ### `POST /room/:id/game/exchange` (auth) — body `{hand_index}` (a dead card, up to `exchanges_per_turn` per turn, before playing)
@@ -412,6 +463,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `room_updated` | Room (see above) | After every successful join or game start, sent to **every** connected socket |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
+| `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
 | `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
 
 | Event (client → server) | Payload | Meaning |

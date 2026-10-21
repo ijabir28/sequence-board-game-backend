@@ -113,7 +113,8 @@ function create_game({teams, rules = {}, random = Math.random, first = 0}) {
     for (let seat = 0; seat < team_count * players_per_team; seat++) {
         const team = seat % team_count;
         const player = teams[team].players[Math.floor(seat / team_count)];
-        players.push({handle: player.handle, name: player.name, team});
+        // A bot (a computer player at a matchmaking table) is marked, so the server knows to move for it.
+        players.push(Object.assign({handle: player.handle, name: player.name, team}, player.bot ? {bot: true} : {}));
     }
 
     if (!Number.isInteger(first) || first < 0 || first >= players.length) {
@@ -523,6 +524,7 @@ function view_for(state, handle, settings = {}) {
         team_count: state.team_count,
         sequences_to_win: sequences_to_win(state.team_count),
         players: state.players.map(function (p, i) {
+            // Whether a seat is a bot's stays on the server.
             return {handle: p.handle, name: p.name, team: p.team, hand_count: state.hands[i].length};
         }),
         current_player: state.winner === null ? current_player(state).handle : null,
@@ -551,10 +553,15 @@ function view_for(state, handle, settings = {}) {
 
 module.exports = {
     DIRECTIONS,
+    BOARD_LAYOUT,
     card_kind,
     counts_for,
+    is_corner,
+    is_locked,
+    sequences_to_win,
     in_bounds,
     can_exchange,
+    can_pass,
     exchanges_left,
     RuleError,
     random_move,

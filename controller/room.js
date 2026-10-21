@@ -162,7 +162,14 @@ async function room_payload({id}) {
         administrator: room.administrator,
         administrator_name: room.administrator_name,
         settings: room.settings,
-        teams: room.teams,
+        // Seats as players see them: whether one is a bot's stays on the server.
+        teams: room.teams.map(function (team) {
+            return Object.assign({}, team, {
+                players: team.players.map(function (player) {
+                    return player === null ? null : {handle: player.handle, name: player.name};
+                }),
+            });
+        }),
         created_at: room.created_at,
         game_started: game !== undefined,
         // The round being played (or just won), and whether the host has ended the rounds.

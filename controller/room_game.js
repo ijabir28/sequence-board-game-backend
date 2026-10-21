@@ -1,10 +1,12 @@
 const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_room = require('../database/rooms');
 const db_game = require('../database/games');
+const db_user = require('../database/users');
 const {transaction} = require('../database/pool');
 const socket_server = require('../socket');
 const {broadcast_room} = require('./room');
 const {RuleError, create_game, random_first_seat, next_first_seat, apply_move, view_for, random_move} = require('../entity/sequence_game');
+const {choose_move} = require('../entity/bot');
 const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
 
@@ -23,6 +25,8 @@ const STATUS_BY_ERROR = {
     ROUND_IN_PROGRESS: 409,
     ROUND_NOT_FOUND: 404,
     ROUNDS_OVER: 409,
+    FORFEITED: 409,
+    NOT_A_QUICK_MATCH: 409,
     HISTORY_DISABLED: 403,
 };
 
@@ -92,18 +96,20 @@ function resume_turn(room, game, now = new Date()) {
 }
 
 // Pauses the turn if its player is away from the table and resumes it once they're back. `acting` is someone known to
-// be there (the player who just moved), whether or not their game page has a socket open.
+// be there (the player who just moved), whether or not their game page has a socket open. A matchmaking table never
+// waits: its players are strangers, so one who walks away has their turns played for them when the timer runs out.
 function follow_presence(room, game, now = new Date(), acting = null) {
     if (game.winner !== null || !game.turn_started_at) return game;
+    if (room.matchmaking) return resume_turn(room, game, now);
     const handle = game.players[game.current].handle;
     return handle === acting || presence.is_present(room.id, handle) ? resume_turn(room, game, now) : pause_turn(game, now);
 }
 
-// Seated players whose game page isn't open.
+// Seated players whose game page isn't open. Bots are always at the table.
 function away_players(room, game) {
     return game.players
         .filter(function (player) {
-            return !presence.is_present(room.id, player.handle);
+            return !player.bot && !presence.is_present(room.id, player.handle);
         })
         .map(function (player) {
             return player.handle;
@@ -129,18 +135,29 @@ async function rounds_of(room, game, client) {
     return {round: game.round || 1, over, results, summary: over ? series_summary(results, game.team_count) : null};
 }
 
-// The game as `handle` sees it, under the room's settings. `rounds` is from rounds_of().
+// Whether `handle` forfeited this quick match: their seat is played by a bot now, or the game ended.
+function has_forfeited(game, handle) {
+    return Array.isArray(game.forfeited) && game.forfeited.includes(handle);
+}
+
+// The game as `handle` sees it, under the room's settings. `rounds` is from rounds_of(). A player who forfeited sees it
+// as a spectator: their seat (and its hand) is no longer theirs.
 function view(room, game, handle, rounds) {
-    const seen = view_for(game, handle, room.settings);
+    const forfeited = has_forfeited(game, handle);
+    const seen = view_for(game, forfeited ? null : handle, room.settings);
     // server_time lets clients run the turn timer from their own clock even when it is off.
     const deadline = turn_deadline(room, game);
-    const seated = game.players.some(function (player) {
+    const seated = !forfeited && game.players.some(function (player) {
         return player.handle === handle;
     });
     return Object.assign(seen, {
         name: room.name,
         // The host deals each round, and decides after one is won whether to play another.
         host: room.administrator,
+        // Made by the Quick Match queue: one round, rated on the matchmaking leaderboard.
+        matchmaking: room.matchmaking === true,
+        // The viewer forfeited this quick match.
+        forfeited,
         rounds,
         turn_started_at: game.turn_started_at || null,
         turn_deadline: deadline === null ? null : deadline.toISOString(),
@@ -165,6 +182,109 @@ function signed_in_handle(req) {
     const handle = req.handle;
     if (handle === undefined) throw new GameError('NOT_SIGNED_IN', 'Sign in to play.');
     return handle;
+}
+
+// How long the players at a new matchmaking table get on top of the first turn's timer, to open the game: it doesn't
+// wait for them (see follow_presence()).
+const MATCH_START_GRACE_MS = 10000;
+
+/**
+ * Deals round 1 at a full table, inside the transaction that locked the room, and saves it. Returns the game state.
+ * Players are still on the table page, so the first turn usually starts paused until its player opens the game (a
+ * matchmaking table gives them a little extra time instead).
+ */
+async function deal_first_round(room, client, now = new Date()) {
+    // Who moves first in round 1 is drawn at random; each later round passes it to the next seat.
+    const first = random_first_seat(room.teams);
+    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: 1});
+    let created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
+    // The time a turn spent paused is added to it, so this is extra time for the first turn.
+    if (room.matchmaking) created = Object.assign({}, created, {turn_paused_ms: MATCH_START_GRACE_MS});
+    await db_game.create({room_id: room.id, state: created, turn_deadline: turn_deadline(room, created), client});
+    return created;
+}
+
+// A matchmaking table plays a single round: the move that wins it also ends the rounds. Returns the room as it now is.
+async function after_move(room, next, client) {
+    if (!room.matchmaking || next.winner === null || room.rounds_ended_at !== null) return room;
+    await db_room.end_rounds({id: room.id, client});
+    return Object.assign({}, room, {rounds_ended_at: new Date()});
+}
+
+/**
+ * Plays the current player's whole turn with moves from `choose(state)`, recording each: an exchange keeps the turn,
+ * so it goes on until the turn is over (at most a few exchanges and a play). `mark(previous, next)` may change what a
+ * move logged. Call inside the transaction that read `game` with a lock. Returns {room, state} after the turn.
+ */
+async function play_turn({room, game, choose, mark = null, timed_out = false, now, client}) {
+    const seat = game.players[game.current];
+    // A bot playing a forfeited seat moves as that seat, but the moves are its own in `turns`.
+    const mover = seat.played_by || seat.handle;
+    let state = game;
+    do {
+        const move = choose(state);
+        const applied = apply_move(state, seat.handle, move);
+        const next = follow_presence(room, stamp_turn(state, mark ? mark(state, applied) : applied, now), now);
+        await db_game.record_move({
+            room_id: room.id, previous: state, next, handle: mover, move,
+            turn_deadline: turn_deadline(room, next), timed_out, stats: stats_for(next), client,
+        });
+        state = next;
+    } while (state.winner === null && state.turn === game.turn && state.current === game.current);
+    return {room: await after_move(room, state, client), state};
+}
+
+// Turns in a row a quick match player can let the timer play for them before they forfeit.
+const MISSED_TURNS_TO_FORFEIT = 10;
+
+// The game with `handle`'s count of turns missed in a row set to `count`.
+function with_missed(game, handle, count) {
+    return Object.assign({}, game, {missed: Object.assign({}, game.missed, {[handle]: count})});
+}
+
+/**
+ * `handle` forfeits the quick match `game`, inside the transaction that locked it. With two teams the other team wins
+ * at once and the round is rated as usual (the forfeiter's loss is marked as a forfeit). With three, the forfeiter
+ * loses rating now, and a bot takes over their seat under their name for the rest of the game, so nobody else can
+ * tell; whatever that seat does later, it rates nobody (see migration 0019). `auto` says it was for missing turns.
+ * Returns {room, state}.
+ */
+async function forfeit_player({room, game, handle, auto = false, client}) {
+    const seat = game.players.findIndex(function (player) {
+        return player.handle === handle;
+    });
+    const player = game.players[seat];
+    const user_id = await db_user.id_of({handle, client});
+    await db_room.forfeit_seat({id: room.id, user_id, client});
+    const forfeited = (game.forfeited || []).concat(handle);
+
+    if (game.team_count === 2) {
+        const winner = 1 - player.team;
+        const state = Object.assign({}, game, {
+            forfeited,
+            winner,
+            log: game.log.concat(
+                {kind: 'forfeit', turn: game.turn, player: player.name, team: player.team, auto},
+                {kind: 'win', turn: game.turn, team: winner}
+            ),
+        });
+        await db_game.finish({room_id: room.id, state, stats: round_stats(state), client});
+        await db_game.mark_forfeit({room_id: room.id, user_id, client});
+        return {room: await after_move(room, state, client), state};
+    }
+
+    const taken = game.players.map(function (p) {
+        return p.played_by || p.handle;
+    });
+    const [bot] = await db_user.random_bots({count: 1, except: taken, client});
+    if (bot === undefined) throw new Error('No bot is free to take the seat.');
+    await db_game.rate_forfeit({room_id: room.id, user_id, client});
+    const players = game.players.map(function (p, i) {
+        return i === seat ? Object.assign({}, p, {bot: true, played_by: bot.handle}) : p;
+    });
+    const state = with_missed(Object.assign({}, game, {players, forfeited}), handle, 0);
+    await db_game.save_state({room_id: room.id, state, turn_deadline: turn_deadline(room, state), client});
+    return {room, state};
 }
 
 function broadcast_game(room_id) {
@@ -194,13 +314,7 @@ async function start(req, res) {
         }
         if (!db_room.is_full(room)) throw new GameError('TABLE_NOT_FULL', 'Every seat must be taken before the game can start.');
 
-        // Players are still on the table page, so the first turn usually starts paused until its player opens the game.
-        const now = new Date();
-        // Who moves first in round 1 is drawn at random; each later round passes it to the next seat.
-        const first = random_first_seat(room.teams);
-        const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: 1});
-        const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
-        await db_game.create({room_id: id, state: created, turn_deadline: turn_deadline(room, created), client});
+        const created = await deal_first_round(room, client);
         return {room, game: created, rounds: await rounds_of(room, created, client)};
     });
     res.send(view(room, game, handle, rounds));
@@ -304,18 +418,22 @@ function move_handler(build_move) {
         const move = build_move(req.body || {});
         const {room, next, rounds} = await transaction(async function (client) {
             const {room, game} = await find_game(id, client);
+            if (has_forfeited(game, handle)) throw new GameError('FORFEITED', 'You forfeited this match.');
             const seated = game.players.some(function (player) {
                 return player.handle === handle;
             });
             if (!seated) throw new GameError('NOT_A_PLAYER', "You don't have a seat in this game.");
 
             const now = new Date();
-            const played = follow_presence(room, stamp_turn(game, apply_move(game, handle, move), now), now, handle);
+            let played = follow_presence(room, stamp_turn(game, apply_move(game, handle, move), now), now, handle);
+            // Moving for yourself ends a run of missed turns.
+            if (room.matchmaking && game.missed && game.missed[handle]) played = with_missed(played, handle, 0);
             await db_game.record_move({
                 room_id: id, previous: game, next: played, handle, move,
                 turn_deadline: turn_deadline(room, played), stats: stats_for(played), client,
             });
-            return {room, next: played, rounds: await rounds_of(room, played, client)};
+            const after = await after_move(room, played, client);
+            return {room: after, next: played, rounds: await rounds_of(after, played, client)};
         });
         res.send(view(room, next, handle, rounds));
         broadcast_game(id);
@@ -348,6 +466,30 @@ function mark_timed_out(previous, next) {
 }
 
 /**
+ * POST /room/:id/game/forfeit: the signed-in player gives up their quick match (see forfeit_player()). Answers with the
+ * game as they now see it.
+ */
+async function forfeit(req, res) {
+    const {id} = req.params;
+    const handle = signed_in_handle(req);
+    const {room, state, rounds} = await transaction(async function (client) {
+        const {room, game} = await find_game(id, client);
+        if (!room.matchmaking) throw new GameError('NOT_A_QUICK_MATCH', 'Only quick matches can be forfeited.');
+        if (has_forfeited(game, handle)) throw new GameError('FORFEITED', 'You forfeited this match.');
+        const seated = game.players.some(function (player) {
+            return player.handle === handle && !player.bot;
+        });
+        if (!seated) throw new GameError('NOT_A_PLAYER', "You don't have a seat in this game.");
+        if (game.winner !== null) throw new GameError('GAME_OVER', 'The game is over.');
+        const done = await forfeit_player({room, game, handle, client});
+        return Object.assign(done, {rounds: await rounds_of(done.room, done.state, client)});
+    });
+    res.send(view(room, state, handle, rounds));
+    broadcast_game(id);
+    await broadcast_room({id});
+}
+
+/**
  * Plays for the current player of `room_id` if their turn timer has run out: a random playable card (after
  * exchanging a dead card if nothing else can be played), or a pass. If that player isn't at the table, their turn
  * is paused instead. Runs in one transaction with the game locked
@@ -359,25 +501,31 @@ async function expire_turn(room_id, now = new Date()) {
         const deadline = await db_game.get_deadline({room_id, client});
         if (game.winner !== null || deadline === null || deadline > now) return 'waiting';
 
-        const player = game.players[game.current].handle;
+        const player = game.players[game.current];
         // Nobody plays for a player who isn't at the table: their turn waits for them (after a restart, for example,
-        // before their page has reconnected).
-        if (!presence.is_present(room.id, player)) {
+        // before their page has reconnected). Matchmaking tables and bots never wait.
+        if (!room.matchmaking && !player.bot && !presence.is_present(room.id, player.handle)) {
             const paused = pause_turn(game, now);
             await db_game.save_state({room_id, state: paused, turn_deadline: null, client});
             return 'paused';
         }
-        let state = game;
-        // An exchange keeps the turn, so keep going until the turn is over (at most an exchange and a play).
-        do {
-            const move = random_move(state);
-            const next = follow_presence(room, stamp_turn(state, mark_timed_out(state, apply_move(state, player, move)), now), now);
-            await db_game.record_move({
-                room_id, previous: state, next, handle: player, move,
-                turn_deadline: turn_deadline(room, next), timed_out: true, stats: stats_for(next), client,
-            });
-            state = next;
-        } while (state.winner === null && state.turn === game.turn && state.current === game.current);
+        const played = await play_turn({
+            room, game, now, client, timed_out: true, mark: mark_timed_out,
+            choose: function (state) {
+                return random_move(state);
+            },
+        });
+        // A quick match player who keeps letting the timer play for them has left: after enough turns in a row
+        // they forfeit.
+        if (room.matchmaking && !player.bot && played.state.winner === null) {
+            const missed = ((game.missed && game.missed[player.handle]) || 0) + 1;
+            if (missed >= MISSED_TURNS_TO_FORFEIT) {
+                await forfeit_player({room: played.room, game: played.state, handle: player.handle, auto: true, client});
+            } else {
+                const state = with_missed(played.state, player.handle, missed);
+                await db_game.save_state({room_id, state, turn_deadline: turn_deadline(room, state), client});
+            }
+        }
         return 'played';
     });
     if (outcome !== 'waiting') broadcast_game(room_id);
@@ -403,6 +551,61 @@ async function presence_changed(room_id, now = new Date()) {
     return outcome === 'changed';
 }
 
+// How long a bot thinks before it moves: a few seconds, different every turn, as a person would, and always well
+// within the turn timer. BOT_THINK_MS is the shortest.
+const BOT_THINK_MS = 1500;
+const BOT_THINK_MAX_MS = 7000;
+
+function bot_think_ms(room, game) {
+    let hash = 0;
+    for (const char of `${room.id}:${game.turn}`) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    const longest = Math.max(BOT_THINK_MS, Math.min(BOT_THINK_MAX_MS, room.settings.turn_seconds * 1000 - 4000));
+    return BOT_THINK_MS + (hash % (longest - BOT_THINK_MS + 1));
+}
+
+// The bot's move, or a random one should the bot ever pick a move the rules refuse (the turn must go on).
+function bot_move(state) {
+    const move = choose_move(state);
+    try {
+        apply_move(state, state.players[state.current].handle, move);
+        return move;
+    } catch (e) {
+        if (!(e instanceof RuleError)) throw e;
+        console.error(`The bot chose a move the rules refused (${e.code}); playing a random one instead.`);
+        return random_move(state);
+    }
+}
+
+/**
+ * Plays the bot's turn at `room_id` if a bot is to move and has "thought" (bot_think_ms()), in one transaction with the
+ * game locked, like a player's move. Returns whether it played.
+ */
+async function play_bot_turn(room_id, now = new Date()) {
+    const played = await transaction(async function (client) {
+        const {room, game} = await find_game(room_id, client);
+        const player = game.players[game.current];
+        if (game.winner !== null || !player.bot) return false;
+        if (game.turn_started_at && Date.parse(game.turn_started_at) + bot_think_ms(room, game) > now.getTime()) return false;
+        await play_turn({room, game, now, client, choose: bot_move});
+        return true;
+    });
+    if (played) broadcast_game(room_id);
+    return played;
+}
+
+/** Plays every bot turn that is due. Returns how many it played. */
+async function play_bot_turns(now = new Date()) {
+    let count = 0;
+    for (const room_id of await db_game.bot_turns({started_before: new Date(now.getTime() - BOT_THINK_MS)})) {
+        try {
+            if (await play_bot_turn(room_id, now)) count++;
+        } catch (e) {
+            console.error(`Could not play the bot's turn at ${room_id}:`, e);
+        }
+    }
+    return count;
+}
+
 /** Plays for every player whose turn timer has run out. Returns how many turns it played. */
 async function expire_overdue_turns(now = new Date()) {
     let count = 0;
@@ -416,18 +619,15 @@ async function expire_overdue_turns(now = new Date()) {
     return count;
 }
 
-/**
- * Checks for timed-out turns every `interval_ms`, one sweep at a time. Started by bin/www (not by the app, so
- * tests stay in control). Returns a function that stops it.
- */
-function start_turn_timer({interval_ms = 1000} = {}) {
+// Runs `sweep()` every `interval_ms`, one at a time. Returns a function that stops it.
+function every(interval_ms, sweep, label) {
     let running = false;
     const timer = setInterval(function () {
         if (running) return;
         running = true;
-        expire_overdue_turns()
+        sweep()
             .catch(function (e) {
-                console.error('Turn timer sweep failed:', e.message);
+                console.error(`${label} sweep failed:`, e.message);
             })
             .finally(function () {
                 running = false;
@@ -439,6 +639,22 @@ function start_turn_timer({interval_ms = 1000} = {}) {
     };
 }
 
+/**
+ * Checks for timed-out turns every `interval_ms`, one sweep at a time. Started by bin/www (not by the app, so
+ * tests stay in control). Returns a function that stops it.
+ */
+function start_turn_timer({interval_ms = 1000} = {}) {
+    return every(interval_ms, expire_overdue_turns, 'Turn timer');
+}
+
+/**
+ * Lets the bots move, checking every `interval_ms` (a query each time, so no more often than the turn timer). Started
+ * by bin/www, like the turn timer. Returns a stopper.
+ */
+function start_bot_players({interval_ms = 1000} = {}) {
+    return every(interval_ms, play_bot_turns, 'Bot player');
+}
+
 module.exports = {
     start: handler(start),
     get: handler(get),
@@ -446,11 +662,19 @@ module.exports = {
     play,
     exchange,
     pass,
+    forfeit: handler(forfeit),
+    MISSED_TURNS_TO_FORFEIT,
     next_round,
     end_rounds,
     round_detail: handler(round_detail),
     expire_turn,
     expire_overdue_turns,
     start_turn_timer,
+    deal_first_round,
+    play_bot_turn,
+    play_bot_turns,
+    start_bot_players,
+    BOT_THINK_MS,
+    MATCH_START_GRACE_MS,
     presence_changed,
 };

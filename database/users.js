@@ -16,7 +16,7 @@ async function get_user({handle}) {
 async function stats({user_id}) {
     const {rows} = await pool.query(
         `SELECT count(*) FILTER (WHERE games.finished_at IS NOT NULL)::INT AS played,
-                count(*) FILTER (WHERE games.winner_team = room_seats.team)::INT AS won,
+                count(*) FILTER (WHERE games.winner_team = room_seats.team AND room_seats.forfeited_at IS NULL)::INT AS won,
                 count(*) FILTER (WHERE games.finished_at IS NULL)::INT AS playing
          FROM room_seats JOIN games ON games.room_id = room_seats.room_id
          WHERE room_seats.user_id = $1`,
@@ -64,4 +64,22 @@ async function set_board_style({user_id, board_style}) {
     await pool.query('UPDATE users SET board_style = $2, updated_at = now() WHERE id = $1', [user_id, board_style]);
 }
 
-module.exports = {get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style};
+/**
+ * `count` different bots, picked at random, none of them with a handle in `except`: [{user_id, handle, name}]. Bots are
+ * made by migration 0018.
+ */
+async function random_bots({count, except = [], client = pool}) {
+    const {rows} = await client.query(
+        'SELECT id AS user_id, handle, name FROM users WHERE is_bot AND handle <> ALL($2) ORDER BY random() LIMIT $1',
+        [count, except]
+    );
+    return rows;
+}
+
+/** The user's id for a handle, or undefined. */
+async function id_of({handle, client = pool}) {
+    const {rows} = await client.query('SELECT id FROM users WHERE handle = $1', [handle]);
+    return rows[0] === undefined ? undefined : rows[0].id;
+}
+
+module.exports = {random_bots, id_of, get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style};

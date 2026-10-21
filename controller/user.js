@@ -150,33 +150,37 @@ const LEADERBOARD_PER_PAGE = {default: 20, max: 50};
 /**
  * GET /user/leaderboard?period=all|week|day&page=1&per_page=20: one page of the board, best first, with the totals
  * for paging and `you`, the signed-in player's own entry (null when they aren't on this board), so the page can show
- * where they stand even when they are further down.
+ * where they stand even when they are further down. `ladder` picks the board: private tables (`custom`, this
+ * endpoint) or Quick Match (`matchmaking`, GET /matchmaking/leaderboard).
  */
-async function leaderboard(req, res) {
-    const user = await signed_in_user(req);
-    const period = req.query.period === undefined ? 'all' : String(req.query.period);
-    if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
-        throw new UserError('INVALID_PERIOD', 'Choose a leaderboard period: all time, this week or today.');
-    }
-    const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
-    const page = positive_integer(req.query.page, 1);
-    const [board, you] = await Promise.all([
-        db_leaderboard.list({period, limit: per_page, offset: (page - 1) * per_page}),
-        db_leaderboard.entry_for({period, user_id: user.id}),
-    ]);
-    res.send({
-        period,
-        players: board.players,
-        you: you === undefined ? null : Object.assign(you, {page: Math.ceil(you.position / per_page)}),
-        page,
-        per_page,
-        total: board.total,
-        pages: Math.max(1, Math.ceil(board.total / per_page)),
-    });
+function leaderboard_of(ladder) {
+    return async function (req, res) {
+        const user = await signed_in_user(req);
+        const period = req.query.period === undefined ? 'all' : String(req.query.period);
+        if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
+            throw new UserError('INVALID_PERIOD', 'Choose a leaderboard period: all time, this week or today.');
+        }
+        const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
+        const page = positive_integer(req.query.page, 1);
+        const [board, you] = await Promise.all([
+            db_leaderboard.list({period, ladder, limit: per_page, offset: (page - 1) * per_page}),
+            db_leaderboard.entry_for({period, ladder, user_id: user.id}),
+        ]);
+        res.send({
+            period,
+            players: board.players,
+            you: you === undefined ? null : Object.assign(you, {page: Math.ceil(you.position / per_page)}),
+            page,
+            per_page,
+            total: board.total,
+            pages: Math.max(1, Math.ceil(board.total / per_page)),
+        });
+    };
 }
 
 module.exports = {
-    leaderboard: handler(leaderboard),
+    leaderboard: handler(leaderboard_of('custom')),
+    matchmaking_leaderboard: handler(leaderboard_of('matchmaking')),
     profile: handler(profile),
     upload_avatar: handler(upload_avatar),
     remove_avatar: handler(remove_avatar),
