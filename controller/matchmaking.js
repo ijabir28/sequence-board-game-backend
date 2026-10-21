@@ -3,7 +3,7 @@ const db_room = require('../database/rooms');
 const db_user = require('../database/users');
 const {transaction} = require('../database/pool');
 const {DEFAULT_SETTINGS, generate_slug} = require('../entity/room');
-const {MatchQueue, MatchmakingError, BOT_AFTER_MS, parse_config} = require('../entity/matchmaking');
+const {MatchQueue, MatchmakingError, parse_config} = require('../entity/matchmaking');
 const {deal_first_round} = require('./room_game');
 const {broadcast_room} = require('./room');
 const socket_server = require('../socket');
@@ -12,6 +12,9 @@ const socket_server = require('../socket');
 // with others who asked for the same, or with bots once they've waited two minutes (entity/matchmaking.js). The
 // table is dealt straight away and plays one round, rated on the matchmaking leaderboard. Errors are JSON:
 // {error: CODE, message}.
+//
+// Bots pass for players: nothing a client is sent says a seat is a bot's or when bots would be brought in (no bot
+// time, no count of who else is waiting), and a match is announced with every seat's handle alike.
 //
 // The queue is in memory, so a restart empties it; waiting pages see they're no longer queued and queue again.
 
@@ -47,12 +50,16 @@ function shuffled(items, random = Math.random) {
  * Makes the table for a match from the queue: one seat per team, in random order, bots in the seats nobody took;
  * then deals its round. Resolves to the table's code.
  */
-async function create_match({config, entries, bots}) {
+async function create_match(match) {
+    const {config, entries, bots} = match;
     const bot_players = bots > 0 ? await db_user.random_bots({count: bots}) : [];
     if (bot_players.length < bots) throw new Error(`Only ${bot_players.length} bots for ${bots} seats.`);
     const players = shuffled(entries.map(function (entry) {
         return entry.player;
     }).concat(bot_players));
+    match.handles = players.map(function (player) {
+        return player.handle;
+    });
     const name = `Quick Match · ${TIMER_NAMES[config.timer]}`;
     const id = await db_room.create({
         make_id: function () {
@@ -98,7 +105,7 @@ async function run_matches(now = Date.now()) {
                 matched.set(handle, {room_id, at: now});
             });
             made++;
-            socket_server.broadcast({event: 'match_found', data: {room_id, players: handles}});
+            socket_server.broadcast({event: 'match_found', data: {room_id, players: match.handles}});
             await broadcast_room({id: room_id});
         } catch (e) {
             console.error('Could not make a quick match table:', e);
@@ -122,9 +129,6 @@ async function status_of(player, now) {
             timer: entry.config.timer,
             turn_seconds: entry.config.turn_seconds,
             joined_at: new Date(entry.joined_at).toISOString(),
-            // When bots take the empty seats, unless enough people come first.
-            bots_at: new Date(entry.joined_at + BOT_AFTER_MS).toISOString(),
-            waiting: queue.waiting_with(entry),
             server_time: new Date(now).toISOString(),
         };
     }

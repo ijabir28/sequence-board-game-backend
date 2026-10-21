@@ -524,7 +524,8 @@ function view_for(state, handle, settings = {}) {
         team_count: state.team_count,
         sequences_to_win: sequences_to_win(state.team_count),
         players: state.players.map(function (p, i) {
-            return Object.assign({handle: p.handle, name: p.name, team: p.team, hand_count: state.hands[i].length}, p.bot ? {bot: true} : {});
+            // Whether a seat is a bot's stays on the server.
+            return {handle: p.handle, name: p.name, team: p.team, hand_count: state.hands[i].length};
         }),
         current_player: state.winner === null ? current_player(state).handle : null,
         turn: state.turn,
