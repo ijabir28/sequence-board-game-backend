@@ -304,6 +304,35 @@ describe_with_database('rooms and table games', function () {
             expect(turns[0].events[0].card).toBe(turns[0].card);
         });
 
+        test('anyone with the link watches the game read-only: no hand, no presence token, no moves', async function () {
+            const id = await open_room('alice', 2, 1);
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_2');
+            await agents.alice.post(`/room/${id}/start`).expect(200);
+            const spectators = require('./spectators');
+            spectators.watch({room_id: id, connection: 'test-watcher'});
+
+            for (const watcher of [request(app), agents.carol]) {
+                const watched = await watcher.get(`/room/${id}/game`);
+                expect(watched.status).toBe(200);
+                expect(watched.body).toMatchObject({viewer: null, hand: [], presence_token: null, can_exchange: false, can_pass: false, spectators: 1});
+                expect(watched.body.players.map((p) => p.hand_count)).toEqual([7, 7]);
+                expect(watched.body).not.toHaveProperty('hands');
+                expect(watched.body).not.toHaveProperty('deck');
+            }
+            spectators.unwatch({room_id: id, connection: 'test-watcher'});
+
+            const {body: move} = await legal_play(id);
+            for (const path of ['game/play', 'game/exchange', 'game/pass']) {
+                const anonymous = await request(app).post(`/room/${id}/${path}`).send(move);
+                expect([anonymous.status, anonymous.body.error]).toEqual([401, 'NOT_SIGNED_IN']);
+                const unseated = await agents.carol.post(`/room/${id}/${path}`).send(move);
+                expect([unseated.status, unseated.body.error]).toEqual([403, 'NOT_A_PLAYER']);
+            }
+            expect((await agents.carol.post(`/room/${id}/rounds/next`)).body.error).toBe('NOT_HOST');
+            expect((await agents.alice.get(`/room/${id}/game`)).body.turn).toBe(1);
+        });
+
         test('the first turn of round 1 goes to a seat drawn at random', async function () {
             async function opener(random) {
                 const id = await open_room('carol', 2, 1);
