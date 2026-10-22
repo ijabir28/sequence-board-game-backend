@@ -9,6 +9,7 @@ const {RuleError, create_game, random_first_seat, next_first_seat, apply_move, v
 const {choose_move} = require('../entity/bot');
 const {round_stats, series_summary} = require('../entity/rounds');
 const presence = require('./presence');
+const spectators = require('./spectators');
 
 // A game played at a room's table. Errors are JSON: {error: CODE, message}.
 
@@ -167,6 +168,8 @@ function view(room, game, handle, rounds) {
         away: away_players(room, game),
         // A seated player's game socket sends this to say they are at the table (see controller/presence.js).
         presence_token: seated ? presence.token_for(room.id, handle) : null,
+        // How many people are watching without a seat (see controller/spectators.js).
+        spectators: spectators.count(room.id),
         server_time: new Date().toISOString(),
     });
 }

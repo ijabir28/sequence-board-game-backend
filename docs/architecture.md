@@ -56,7 +56,8 @@ auth.js               Better Auth: accounts, sessions, email confirmation, passw
                       load_session puts req.user / req.handle
 mailer.js             Sends account emails via Brevo's API (BREVO_API_KEY) or SMTP (SMTP_URL), else logs them
 docker-compose.yml    Development environment: Postgres, backend, frontend
-socket.js             Single Socket.IO server + broadcast({event, data}) to every connected socket; join_game/leave_game
+socket.js             Single Socket.IO server + broadcast({event, data}) to every connected socket; join_game/leave_game,
+                      watch_game/unwatch_game
 
 routes/               Thin routers: auth (Better Auth + rate limits), user, room, game, board
 controller/
@@ -66,6 +67,7 @@ controller/
                       pauses the turn of a player who is away from the table; plays the bots' turns
   matchmaking.js      The Quick Match queue (in memory): seats matched players, with bots after a 2 minute wait
   presence.js         In memory: which seated players have their table's game open (signed socket tokens)
+  spectators.js       In memory: how many sockets watch each table's game without a seat (watch_game)
   board.js            serves data/board_deck.json (module singleton, also used as live board state)
   game.js             LEGACY global game: 4 hard-coded players, deal on module load, play endpoint
   index.js            Dead code (unattached socket.io instance, unused inquirer controller)

@@ -283,7 +283,9 @@ Moves on one table are applied one at a time: of two simultaneous moves by the c
 gets `409 NOT_YOUR_TURN`. Every accepted move is recorded (see [`GET /room/:id/turns`](#get-roomidturns)).
 
 ### `GET /room/:id/game`
-The GameView for the session's user. Anyone may watch; only seated players see a hand (their own).
+The GameView for the session's user. Anyone with the table's code may watch, signed in or not: a spectator gets the
+same view with `viewer: null`, an empty `hand`, no `presence_token` and nothing they may do (`can_exchange`, `can_pass`
+false). Every move, forfeit and round decision refuses them (`401 NOT_SIGNED_IN`, `403 NOT_A_PLAYER` or `NOT_HOST`).
 
 ```jsonc
 // GameView
@@ -311,6 +313,7 @@ The GameView for the session's user. Anyone may watch; only seated players see a
   "turn_time_left_ms": null,         // while paused: the time the current player will have left; else null
   "away": ["sakib"],                 // seated players whose game page isn't open
   "presence_token": "q9…",           // seated players only: send it with the socket's join_game (null for spectators)
+  "spectators": 2,                    // sockets watching without a seat (watch_game)
   "server_time": "2026-10-15T06:55:21.002Z",       // the server's clock now, to run a turn timer despite clock skew
   "settings": {"history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
   "log": [{"kind": "place", "turn": 1, "player": "Jabir ibne kamal", "team": 0, "card": "4-Spade", "pos": {"row": 1, "column": 5}, "wild": false}, …]
@@ -463,6 +466,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `room_updated` | Room (see above) | After every successful join or game start, sent to **every** connected socket |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
+| `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
 | `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
 | `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
 
@@ -470,6 +474,8 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 |---|---|---|
 | `join_game` | `{room_id, handle, token}` | This socket has the table's game open, as `handle`. `token` is the `presence_token` from that player's GameView; anything else is ignored |
 | `leave_game` | `{room_id}` | This socket closed the game (left the game page) |
+| `watch_game` | `{room_id}` | This socket watches the table's game without a seat, so it is counted in `spectators`. Needs no sign-in; a socket counts at up to 5 tables |
+| `unwatch_game` | `{room_id}` | This socket stopped watching (a dropped socket stops at once) |
 
 No other client → server events are handled. For the legacy game there are no events, so clients must re-fetch
 `/board/deck` and `/game/hand_cards` themselves.
