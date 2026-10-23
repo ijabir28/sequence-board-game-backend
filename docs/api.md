@@ -540,7 +540,7 @@ connects; a page whose player signs in or out should reconnect.
 | `open_table_chat` | `{room_id}` | This socket has the table open (its lobby or its game, seated or not) and hears its chat. Needs no sign-in; a socket has up to 5 tables open; an unknown table is ignored |
 | `close_table_chat` | `{room_id}` | This socket stopped hearing the table's chat (a dropped socket stops at once) |
 | `send_table_chat` | `{room_id, text}`, ack | Say `text` at the table. Acknowledged with `{ok: true}` or `{error, message}` |
-| `send_table_reaction` | `{room_id, reaction}`, ack | React at the table, `reaction` one of `thumbs_up`, `clap`, `fire`, `wow`, `laugh`, `oops`, `party`, `gg`. Acknowledged like `send_table_chat` |
+| `send_table_reaction` | `{room_id, reaction}`, ack | React at the table, `reaction` one of `wow`, `clap`, `party`, `fire`, `laugh`, `heart`. Acknowledged like `send_table_chat` |
 
 **Table chat is public.** A message is `{id, author: {handle, name}, text, at}`, where `author` is the signed-in
 account of the socket that sent it and `at` an ISO time. Every message and reaction goes to the whole table: there is

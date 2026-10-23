@@ -137,7 +137,7 @@ describe('table chat', function () {
             const signed_out = fake_socket({account: undefined});
             await signed_out.open('otter-1');
             await expect(signed_out.send('send_table_chat', {room_id: 'otter-1', text: 'hi'})).resolves.toMatchObject({error: 'NOT_SIGNED_IN'});
-            await expect(signed_out.send('send_table_reaction', {room_id: 'otter-1', reaction: 'gg'})).resolves.toMatchObject({error: 'NOT_SIGNED_IN'});
+            await expect(signed_out.send('send_table_reaction', {room_id: 'otter-1', reaction: 'heart'})).resolves.toMatchObject({error: 'NOT_SIGNED_IN'});
             expect(signed_in.io.emitted).toEqual([]);
             expect(signed_out.io.emitted).toEqual([]);
         });

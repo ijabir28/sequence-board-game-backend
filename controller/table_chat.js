@@ -21,7 +21,7 @@ const RATE_WINDOW_MS = 10000;
 const MAX_ROOM_ID_LENGTH = 80;
 
 /** The quick reactions, by id; the client draws each one. */
-const REACTIONS = ['thumbs_up', 'clap', 'fire', 'wow', 'laugh', 'oops', 'party', 'gg'];
+const REACTIONS = ['wow', 'clap', 'party', 'fire', 'laugh', 'heart'];
 
 const ERRORS = {
     NOT_SIGNED_IN: 'Sign in to chat at this table.',
