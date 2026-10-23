@@ -79,14 +79,16 @@ database/
                       0007 highlights and history off by default, 0008 turn timer,
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
                       0016 drops the retired game mode, 0017 leaderboard ratings, 0018 bots, matchmaking
-                      tables and their leaderboard, 0019 bot names, 0020 quick match forfeits
+                      tables and their leaderboard, 0019 bot names, 0020 quick match forfeits, 0022 friendships
+                      and table invitations
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
   rooms.js            Rooms and seats; join() takes a seat under a room lock; list_for_user() for history
   games.js            Table game state (JSONB) and the turns history; kept apart so room payloads never carry hands
   leaderboard.js      The all-time, weekly and daily leaderboards, read from the ratings 0017 keeps (or, for
-                      Quick Match, 0018)
+                      Quick Match, 0018); each limited to one player's friends, or everyone's
+  friends.js          Friendships (one row per pair), searching players, and invitations to tables
 entity/               Domain layer (tested)
   user.js             Handle and display name rules, scrypt password hashing
   emails.js           Account emails: confirmation, password reset, password changed, already registered,
@@ -143,6 +145,8 @@ the whole server, not one per room.
 | `player_ratings` | player with a won round | Elo rating (from 1200), rounds played and won; the all-time leaderboard |
 | `game_results` | player in a won round | Append-only: team, won, rating before and the change; the weekly and daily leaderboards sum these |
 | `matchmaking_ratings`, `matchmaking_results` | as the two above, for Quick Match rounds | The Quick Match leaderboard, kept apart |
+| `friendships` | pair of players | Who asked whom, `pending` or `accepted`; one row per pair whichever way (a unique index on the ordered pair). Declining, cancelling and unfriending delete it. The `friend_links` view lists accepted ones from both sides |
+| `table_invitations` | friend asked to a table | Table, invitee, inviter, time. Gone when the invitee sits down there, dismisses it, or the two stop being friends |
 | `turns` | accepted move in a round | Append-only: move number, game turn, player, team, kind, card, cell, and the log events the move produced |
 
 A move is one transaction in `controller/room_game.js`: read the game `FOR UPDATE`, apply the rules
@@ -177,6 +181,19 @@ counts half), and every player of a team moves by the same whole number of point
 function ignores a round it already rated, and the migration ran it over every round won before, oldest first.
 `database/leaderboard.js` ranks all time by rating (`player_ratings`, indexed in board order) and the last 7 days /
 24 hours by the rating gained in them; ties share a rank and are ordered by wins, then account age.
+
+Players see the **friends** board: the same standings limited to them and their friends (`friend_links`), ranked
+among those players alone, so nobody they aren't friends with is ever listed. The global board's code is kept: it is
+served (as `scope=global`) only when the `GLOBAL_LEADERBOARD` setting is `on` (`controller/user.js`; `render.yaml`
+sets it `off`), and the response's `scopes` tells the frontend whether to offer it.
+
+### Friends and invitations
+
+`controller/friends.js` serves `/friends/…` and `POST /room/:id/invite`. Requests and invitations are delivered over
+Socket.IO only to the player concerned: when a socket connects, `socket.js` reads the session cookie its handshake
+carried, joins it to the room `user:<handle>`, and counts the player online (`controller/online.js`, in memory, so the
+friends list can say who has the app open). `send_to()` emits there; the frontend reconnects its socket after signing
+in or out so the handshake carries the current cookie. Everything else stays a broadcast.
 
 Everything a client needs to resume is in these tables: who sat where, the settings, and the full game state.
 After a restart, `GET /user/rooms` lists a player's tables and `GET /room/:id/game` returns the game as it was.
