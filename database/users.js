@@ -2,7 +2,7 @@ const {pool, transaction} = require('./pool');
 const {avatar_url} = require('../entity/avatar');
 
 // Better Auth (auth.js) creates and changes accounts; the game reads them, and keeps their avatars.
-const PUBLIC_COLUMNS = 'id, handle, name, email, email_verified, image, card_deck, board_style, created_at';
+const PUBLIC_COLUMNS = 'id, handle, name, email, email_verified, image, card_deck, board_style, friends_can_watch, created_at';
 
 async function get_user({handle}) {
     if (typeof handle !== 'string') {
@@ -64,6 +64,10 @@ async function set_board_style({user_id, board_style}) {
     await pool.query('UPDATE users SET board_style = $2, updated_at = now() WHERE id = $1', [user_id, board_style]);
 }
 
+async function set_friends_can_watch({user_id, friends_can_watch}) {
+    await pool.query('UPDATE users SET friends_can_watch = $2, updated_at = now() WHERE id = $1', [user_id, friends_can_watch]);
+}
+
 /**
  * `count` different bots, picked at random, none of them with a handle in `except`: [{user_id, handle, name}]. Bots are
  * made by migration 0018.
@@ -82,4 +86,5 @@ async function id_of({handle, client = pool}) {
     return rows[0] === undefined ? undefined : rows[0].id;
 }
 
-module.exports = {random_bots, id_of, get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style};
+module.exports = {random_bots, id_of, get_user, stats, set_avatar, delete_avatar, get_avatar, set_card_deck, set_board_style,
+    set_friends_can_watch};

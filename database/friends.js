@@ -79,21 +79,24 @@ async function remove({user_id, other_id, status, client = pool}) {
 }
 
 /**
- * The player's friends, by name: [{handle, name, image, since, playing}]. `playing` is the code of a table game in
- * progress they have a seat at (the one that moved last), or null.
+ * The player's friends, by name: [{handle, name, image, since, playing, watch}]. `playing` says whether they have a
+ * seat at a table game in progress; `watch` is that table's code (the one that moved last), but only when the friend
+ * lets friends watch (users.friends_can_watch, migration 0023), else null.
  */
 async function list_friends({user_id, client = pool}) {
     const {rows} = await client.query(
-        `SELECT ${PLAYER_COLUMNS}, friend_links.accepted_at AS since,
+        `SELECT ${PLAYER_COLUMNS}, friend_links.accepted_at AS since, users.friends_can_watch,
                 (SELECT games.room_id FROM room_seats JOIN games ON games.room_id = room_seats.room_id
                  WHERE room_seats.user_id = users.id AND room_seats.forfeited_at IS NULL AND games.finished_at IS NULL
-                 ORDER BY games.updated_at DESC LIMIT 1) AS playing
+                 ORDER BY games.updated_at DESC LIMIT 1) AS game_room
          FROM friend_links JOIN users ON users.id = friend_links.friend_id
          WHERE friend_links.user_id = $1
          ORDER BY lower(users.name), users.handle`,
         [user_id]
     );
-    return rows;
+    return rows.map(function ({friends_can_watch, game_room, ...friend}) {
+        return Object.assign(friend, {playing: game_room !== null, watch: friends_can_watch ? game_room : null});
+    });
 }
 
 /** Requests waiting on either side: {incoming: [{handle, name, image, sent_at}], outgoing: [...]}, newest first. */

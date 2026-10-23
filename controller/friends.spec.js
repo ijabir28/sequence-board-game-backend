@@ -71,7 +71,7 @@ describe_with_database('friends', function () {
         expect((await agents.ben.post('/friends/requests/ann/accept').expect(200)).body).toEqual({handle: 'ann', relationship: 'friends'});
 
         const ann = await overview('ann');
-        expect(ann.friends).toEqual([expect.objectContaining({handle: 'ben', name: 'P ben', online: false, playing: null})]);
+        expect(ann.friends).toEqual([expect.objectContaining({handle: 'ben', name: 'P ben', online: false, playing: false, watch: null})]);
         expect([ann.incoming, ann.outgoing]).toEqual([[], []]);
         expect((await overview('ben')).friends.map((f) => f.handle)).toEqual(['ann']);
         expect((await ask('ben', 'ann')).body.error).toBe('ALREADY_FRIENDS');
@@ -149,8 +149,19 @@ describe_with_database('friends', function () {
             await agents.ann.post(`/room/${id}/start`).expect(200);
             expect((await agents.ann.post(`/room/${id}/invite`).send({handle: 'ben'})).body.error).toBe('GAME_ALREADY_STARTED');
 
-            // ben's friend list says he is playing at that table.
-            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: id})]);
+            // ann's list says ben is playing, but not where: he hasn't let friends watch.
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: null})]);
+            expect((await agents.ben.get('/user/profile')).body.friends_can_watch).toBe(false);
+            const bad = await agents.ben.put('/user/friends-can-watch').send({friends_can_watch: 'yes'});
+            expect([bad.status, bad.body.error]).toEqual([400, 'INVALID_SETTING']);
+            // Once he does, the list links to his table; turning it off hides it again.
+            expect((await agents.ben.put('/user/friends-can-watch').send({friends_can_watch: true}).expect(200)).body)
+                .toEqual({friends_can_watch: true});
+            expect((await agents.ben.get('/user/profile')).body.friends_can_watch).toBe(true);
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: id})]);
+            await agents.ben.put('/user/friends-can-watch').send({friends_can_watch: false}).expect(200);
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: null})]);
+            expect((await request(app).put('/user/friends-can-watch').send({friends_can_watch: true})).status).toBe(401);
             // dan still has cat's open table.
             expect((await overview('dan')).invitations.map((i) => i.room_id)).toEqual([other]);
 

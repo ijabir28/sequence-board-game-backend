@@ -2,6 +2,8 @@ const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
 const db_leaderboard = require('../database/leaderboard');
+const db_friends = require('../database/friends');
+const socket_server = require('../socket');
 const {UserError, real_email, validate_card_deck, validate_board_style} = require('../entity/user');
 const {check_avatar} = require('../entity/avatar');
 
@@ -42,6 +44,7 @@ function public_profile(user, stats) {
         image: user.image,
         card_deck: user.card_deck,
         board_style: user.board_style,
+        friends_can_watch: user.friends_can_watch,
         created_at: user.created_at,
         stats,
     };
@@ -118,6 +121,23 @@ async function set_board_style(req, res) {
     }
     await db_user.set_board_style({user_id: user.id, board_style: checked.board_style});
     res.send({board_style: checked.board_style});
+}
+
+/**
+ * PUT /user/friends-can-watch {friends_can_watch}: 200 {friends_can_watch}. Whether friends get a link to watch the
+ * player's table games from their friends list; off by default. Their friends' lists are told to refresh.
+ */
+async function set_friends_can_watch(req, res) {
+    const user = await signed_in_user(req);
+    const value = req.body && req.body.friends_can_watch;
+    if (typeof value !== 'boolean') {
+        throw new UserError('INVALID_SETTING', 'Choose whether your friends can watch your games: on or off.');
+    }
+    await db_user.set_friends_can_watch({user_id: user.id, friends_can_watch: value});
+    res.send({friends_can_watch: value});
+    (await db_friends.list_friends({user_id: user.id})).forEach(function (friend) {
+        socket_server.send_to({handle: friend.handle, event: 'friends_updated', data: {}});
+    });
 }
 
 // The signed-in user's tables, newest first: where they sat and how far each game got.
@@ -211,6 +231,7 @@ module.exports = {
     avatar: handler(avatar),
     set_card_deck: handler(set_card_deck),
     set_board_style: handler(set_board_style),
+    set_friends_can_watch: handler(set_friends_can_watch),
     rooms: handler(rooms),
     current_game: handler(current_game),
 };

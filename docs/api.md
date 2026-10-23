@@ -66,7 +66,7 @@ address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 mi
 Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name, email, email_verified, image, card_deck, board_style, created_at, stats: {played, won, playing}}`,
+`200 {handle, name, email, email_verified, image, card_deck, board_style, friends_can_watch, created_at, stats: {played, won, playing}}`,
 or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before
 emails were asked for; `image` is the avatar's URL or `null`; `card_deck` is the hand card deck the player chose (see
 `PUT /user/card-deck`) and `board_style` how their board's cells look (`PUT /user/board-style`), each `null` until
@@ -136,6 +136,11 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
 `200 {room}`: the game in progress where you have a seat that moved most recently (the room as in
 `GET /user/rooms`), or `{room: null}`. For a dashboard's "resume your game". `401 NOT_SIGNED_IN` without a session.
 
+### `PUT /user/friends-can-watch` (auth)
+Body `{friends_can_watch: true|false}`: whether friends get a link to watch the player's table games from their friends
+list (`watch` in `GET /friends/list`). Off for every account until turned on. `200 {friends_can_watch}`, `400
+INVALID_SETTING` for anything but a boolean. The player's friends hear `friends_updated`.
+
 ### `GET /user/leaderboard?scope=friends&period=all&page=1&per_page=20` (auth)
 One page of the leaderboard, best first. `scope` is `friends` (default: the signed-in player and their friends only,
 ranked among themselves) or `global` (every rated player), which is refused with `403 GLOBAL_LEADERBOARD_DISABLED`
@@ -194,9 +199,10 @@ players' own sockets as `friends_updated` (see [Socket.IO](#socketio)). Nothing 
 is the frontend's page.
 
 ### `GET /friends/list` (auth)
-`200 {friends, incoming, outgoing, invitations}`. `friends`: `[{handle, name, image, since, online, playing}]` by name,
-where `online` says the friend has the app open and `playing` is the code of a table game in progress they have a seat
-at (or `null`). `incoming` / `outgoing`: requests waiting, `[{handle, name, image, sent_at}]`, newest first.
+`200 {friends, incoming, outgoing, invitations}`. `friends`: `[{handle, name, image, since, online, playing, watch}]` by
+name, where `online` says the friend has the app open, `playing` whether they have a seat at a table game in progress,
+and `watch` that table's code, only when the friend lets friends watch ([`PUT /user/friends-can-watch`](#put-userfriends-can-watch-auth)),
+else `null`. `incoming` / `outgoing`: requests waiting, `[{handle, name, image, sent_at}]`, newest first.
 `invitations`: tables friends asked the player to whose game hasn't started and where they have no seat,
 `[{room_id, room_name, from: {handle, name, image}, sent_at, seats_taken, seats}]`, newest first.
 

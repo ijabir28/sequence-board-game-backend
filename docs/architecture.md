@@ -80,7 +80,7 @@ database/
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
                       0016 drops the retired game mode, 0017 leaderboard ratings, 0018 bots, matchmaking
                       tables and their leaderboard, 0019 bot names, 0020 quick match forfeits, 0022 friendships
-                      and table invitations
+                      and table invitations, 0023 letting friends watch (off by default)
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)

@@ -74,8 +74,9 @@ function public_player({handle, name, image}) {
 }
 
 /**
- * GET /friends/list: 200 {friends: [{handle, name, image, since, online, playing}], incoming, outgoing, invitations}.
- * `playing` is the code of a table game in progress the friend has a seat at, or null; `incoming` and `outgoing` are
+ * GET /friends/list: 200 {friends: [{handle, name, image, since, online, playing, watch}], incoming, outgoing,
+ * invitations}. `playing` says whether the friend has a seat at a table game in progress; `watch` is its code, only when
+ * the friend lets friends watch (PUT /user/friends-can-watch), else null; `incoming` and `outgoing` are
  * requests waiting, [{handle, name, image, sent_at}]; `invitations` are tables friends asked the player to, still open.
  */
 async function overview(req, res) {
