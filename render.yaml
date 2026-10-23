@@ -32,3 +32,7 @@ services:
         sync: false
       - key: TRUST_PROXY
         value: "1"
+      # The global leaderboard (every rated player) is off: players see themselves and their friends. Set to "on"
+      # to offer it again next to the friends board (controller/user.js).
+      - key: GLOBAL_LEADERBOARD
+        value: "off"

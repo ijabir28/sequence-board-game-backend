@@ -17,5 +17,6 @@ router.delete('/avatar', user.remove_avatar);
 router.get('/avatar/:id', user.avatar);
 router.put('/card-deck', user.set_card_deck);
 router.put('/board-style', user.set_board_style);
+router.put('/friends-can-watch', user.set_friends_can_watch);
 
 module.exports = router;

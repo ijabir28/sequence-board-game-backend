@@ -12,6 +12,7 @@ const  {room_router} = require("./routes/room");
 const  {game_router} = require("./routes/game");
 const  {board_router} = require("./routes/board");
 const  matchmaking_router = require("./routes/matchmaking");
+const  friends_router = require("./routes/friends");
 
 const app = express();
 
@@ -64,12 +65,13 @@ app.get('/health', function (req, res) {
 });
 
 // Who is signed in, as req.user and req.handle, for the game's own endpoints.
-app.use(['/user', '/room', '/game', '/board', '/matchmaking'], load_session);
+app.use(['/user', '/room', '/game', '/board', '/matchmaking', '/friends'], load_session);
 app.use('/user', user_router);
 app.use('/room', room_router);
 app.use('/game', game_router);
 app.use('/board', board_router);
 app.use('/matchmaking', matchmaking_router);
+app.use('/friends', friends_router);
 
 // Any other page (/lobby, /table/:id, ...) is a frontend route: hand back the app and let its router take over.
 if (frontend_dist) {

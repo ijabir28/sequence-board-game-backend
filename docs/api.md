@@ -66,7 +66,7 @@ address has an account. `429 TOO_MANY_ATTEMPTS` after 5 from one IP within 15 mi
 Errors are JSON `{error: CODE, message}`; `message` is readable by players. Auth means "uses the session cookie".
 
 ### `GET /user/profile` (auth)
-`200 {handle, name, email, email_verified, image, card_deck, board_style, created_at, stats: {played, won, playing}}`,
+`200 {handle, name, email, email_verified, image, card_deck, board_style, friends_can_watch, created_at, stats: {played, won, playing}}`,
 or `401 NOT_SIGNED_IN`. Clients can use it to ask "am I signed in?". `email` is `null` for accounts made before
 emails were asked for; `image` is the avatar's URL or `null`; `card_deck` is the hand card deck the player chose (see
 `PUT /user/card-deck`) and `board_style` how their board's cells look (`PUT /user/board-style`), each `null` until
@@ -136,15 +136,24 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
 `200 {room}`: the game in progress where you have a seat that moved most recently (the room as in
 `GET /user/rooms`), or `{room: null}`. For a dashboard's "resume your game". `401 NOT_SIGNED_IN` without a session.
 
-### `GET /user/leaderboard?period=all&page=1&per_page=20` (auth)
-One page of the leaderboard, best first. `period` is `all` (default: everyone with a won round, by Elo rating),
+### `PUT /user/friends-can-watch` (auth)
+Body `{friends_can_watch: true|false}`: whether friends get a link to watch the player's table games from their friends
+list (`watch` in `GET /friends/list`). Off for every account until turned on. `200 {friends_can_watch}`, `400
+INVALID_SETTING` for anything but a boolean. The player's friends hear `friends_updated`.
+
+### `GET /user/leaderboard?scope=friends&period=all&page=1&per_page=20` (auth)
+One page of the leaderboard, best first. `scope` is `friends` (default: the signed-in player and their friends only,
+ranked among themselves) or `global` (every rated player), which is refused with `403 GLOBAL_LEADERBOARD_DISABLED`
+unless the server's `GLOBAL_LEADERBOARD` setting is `on`; `scopes` in the answer lists the ones offered.
+`period` is `all` (default: everyone on the board with a won round, by Elo rating),
 `week` or `day` (players who finished a round in the last 7 days / 24 hours, by the rating they gained there).
 `per_page` defaults to 20, at most 50. Each player is
 `{rank, position, handle, name, image, score, rating, rating_change, played, won, lost, win_rate}`: `rank` is shared by
 ties, `position` is 1, 2, 3… down the board; `score` is what the board ranks by (`rating` all time, `rating_change`
 otherwise); `rating_change` is the change since 1200 all time; `win_rate` is `won / played` from 0 to 1.
-`200 {period, players, you, page, per_page, total, pages}`, where `you` is the signed-in player's own entry with the
-`page` it is on, or `null` when they aren't on this board. `400 INVALID_PERIOD`, `401 NOT_SIGNED_IN`. Ratings change
+`200 {scope, scopes, period, players, you, page, per_page, total, pages}`, where `you` is the signed-in player's own
+entry with the `page` it is on, or `null` when they aren't on this board. `400 INVALID_PERIOD`, `400 INVALID_SCOPE`,
+`401 NOT_SIGNED_IN`. Ratings change
 when a round is won; see [architecture](architecture.md#rooms-games-and-history). This board only counts private
 tables; Quick Match has its own, [`GET /matchmaking/leaderboard`](#get-matchmakingleaderboardperiodallpage1per_page20-auth).
 
@@ -177,9 +186,53 @@ The status. A waiting page must call it every few seconds: a player not heard fr
 Leaves the queue. `200` with the status (`idle`, or `playing`).
 
 ### `GET /matchmaking/leaderboard?period=all&page=1&per_page=20` (auth)
-The Quick Match leaderboard, exactly like [`GET /user/leaderboard`](#get-userleaderboardperiodallpage1per_page20-auth)
-but over quick matches only, with ratings of its own (from 1200). Bots are rated, so beating one counts, but are never
+The Quick Match leaderboard, exactly like [`GET /user/leaderboard`](#get-userleaderboardscopefriendsperiodallpage1per_page20-auth)
+but over quick matches only, with ratings of its own (from 1200), and the same `scope`. Bots are rated, so beating one counts, but are never
 listed.
+
+## Friends
+
+Errors are JSON `{error: CODE, message}`, `message` readable by players; every endpoint needs a session (`401
+NOT_SIGNED_IN`). A player is named by their handle (case-insensitive, a leading `@` is ignored); bots are nobody's
+friends (`404 PLAYER_NOT_FOUND`), and naming yourself is `400 CANNOT_FRIEND_SELF`. Every change is announced to both
+players' own sockets as `friends_updated` (see [Socket.IO](#socketio)). Nothing answers bare `GET /friends`: that path
+is the frontend's page.
+
+### `GET /friends/list` (auth)
+`200 {friends, incoming, outgoing, invitations}`. `friends`: `[{handle, name, image, since, online, playing, watch}]` by
+name, where `online` says the friend has the app open, `playing` whether they have a seat at a table game in progress,
+and `watch` that table's code, only when the friend lets friends watch ([`PUT /user/friends-can-watch`](#put-userfriends-can-watch-auth)),
+else `null`. `incoming` / `outgoing`: requests waiting, `[{handle, name, image, sent_at}]`, newest first.
+`invitations`: tables friends asked the player to whose game hasn't started and where they have no seat,
+`[{room_id, room_name, from: {handle, name, image}, sent_at, seats_taken, seats}]`, newest first.
+
+### `GET /friends/search?q=…` (auth)
+Up to 10 players whose handle starts with `q` or whose name contains it (case-insensitive; at least 2 letters, else
+`400 INVALID_SEARCH`), never the player or a bot: `200 {players: [{handle, name, image, relationship}]}`, where
+`relationship` is `none`, `friends`, `incoming` or `outgoing`.
+
+### `POST /friends/requests {handle}` (auth)
+Asks to be friends: `200 {handle, relationship: 'outgoing'}`; when they had already asked, it accepts theirs instead
+(`relationship: 'friends'`). `409 ALREADY_FRIENDS`, `409 ALREADY_REQUESTED`, `409 TOO_MANY_PENDING` (50 unanswered).
+
+### `POST /friends/requests/:handle/accept` (auth)
+Accepts their request: `200 {handle, relationship: 'friends'}`, or `404 REQUEST_NOT_FOUND`.
+
+### `DELETE /friends/requests/:handle` (auth)
+Declines their request or takes back yours: `204`, or `404 REQUEST_NOT_FOUND`.
+
+### `DELETE /friends/:handle` (auth)
+Ends the friendship (and drops invitations between the two): `204`, or `403 NOT_FRIENDS`.
+
+### `GET /friends/invitations` (auth) · `DELETE /friends/invitations/:room_id` (auth)
+The `invitations` of `GET /friends/list`; dismissing one is `204`, or `404 INVITATION_NOT_FOUND`. Taking a seat at
+the table removes it too.
+
+### `POST /room/:id/invite {handle}` (auth)
+Asks a friend to the table: `200 {handle}`. Only someone seated there or its host, before the game starts, while a seat
+is free. Inviting again renews the invitation. The friend hears `table_invitation`. `403 NOT_AT_TABLE`, `403
+NOT_FRIENDS`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED` (quick match tables included), `409 ALREADY_SEATED`,
+`409 TABLE_FULL`.
 
 ## Room
 
@@ -468,7 +521,12 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
 | `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
 | `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
+| `friends_updated` | `{}` | Only to the sockets of a player whose friends, requests or invitations changed: re-fetch `GET /friends/list` |
+| `table_invitation` | `{room_id, room_name, from: {handle, name, image}}` | Only to the invited friend's sockets |
 | `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
+
+Who a socket is (for the two events sent to one player) is read from the session cookie of its handshake when it
+connects; a page whose player signs in or out should reconnect.
 
 | Event (client → server) | Payload | Meaning |
 |---|---|---|

@@ -1,4 +1,5 @@
-// HTTP tests for the leaderboard: Elo ratings from won rounds, and the all-time, weekly and daily boards.
+// HTTP tests for the leaderboard: Elo ratings from won rounds, the all-time, weekly and daily boards, and the friends
+// board players see by default (the global one only when GLOBAL_LEADERBOARD turns it on).
 // Need PostgreSQL, see database/test_database.js.
 const request = require('supertest');
 const {has_database, use_test_schema} = require('../database/test_database');
@@ -49,29 +50,43 @@ describe_with_database('leaderboard', function () {
         return player.handle;
     }
 
+    // The global board, unless `query` asks for another.
     function board(handle, query = {}) {
-        return agents[handle].get('/user/leaderboard').query(query);
+        return agents[handle].get('/user/leaderboard').query(Object.assign({scope: 'global'}, query));
     }
 
+    async function befriend(a, b) {
+        await agents[a].post('/friends/requests').send({handle: b}).expect(200);
+        await agents[b].post(`/friends/requests/${a}/accept`).expect(200);
+    }
+
+    const global_setting = process.env.GLOBAL_LEADERBOARD;
+
     beforeAll(async function () {
+        process.env.GLOBAL_LEADERBOARD = 'on';
         database = await use_test_schema('leaderboard');
         app = require('../app');
         for (const handle of ['alice', 'bob', 'carol', 'dave']) await sign_up(handle);
     });
 
     afterAll(async function () {
+        if (global_setting === undefined) delete process.env.GLOBAL_LEADERBOARD;
+        else process.env.GLOBAL_LEADERBOARD = global_setting;
         await database.drop();
     });
 
-    test('needs a signed-in player and a known period', async function () {
+    test('needs a signed-in player and a known period and scope', async function () {
         expect((await request(app).get('/user/leaderboard')).status).toBe(401);
         const response = await board('alice', {period: 'month'});
         expect([response.status, response.body.error]).toEqual([400, 'INVALID_PERIOD']);
+        const scope = await board('alice', {scope: 'everyone'});
+        expect([scope.status, scope.body.error]).toEqual([400, 'INVALID_SCOPE']);
     });
 
     test('is empty before any round is won', async function () {
         const {body} = await board('alice').expect(200);
-        expect(body).toEqual({period: 'all', players: [], you: null, page: 1, per_page: 20, total: 0, pages: 1});
+        expect(body).toEqual({scope: 'global', scopes: ['friends', 'global'], period: 'all', players: [], you: null,
+            page: 1, per_page: 20, total: 0, pages: 1});
     });
 
     test('a won round rates both players, once, and ranks the winner first', async function () {
@@ -147,5 +162,55 @@ describe_with_database('leaderboard', function () {
         await database.pool.query("UPDATE game_results SET finished_at = now() - interval '2 days'");
         expect((await board('alice', {period: 'week'})).body.total).toBe(4);
         expect((await board('alice', {period: 'day'})).body.total).toBe(0);
+    });
+
+    describe('the friends board', function () {
+        test('is the default, and ranks only the player and their friends among themselves', async function () {
+            const everyone = (await board('alice')).body.players;
+            expect(everyone).toHaveLength(4);
+
+            // Without friends, alice sees only herself, first.
+            const alone = (await agents.alice.get('/user/leaderboard').expect(200)).body;
+            expect(alone).toMatchObject({scope: 'friends', scopes: ['friends', 'global'], total: 1});
+            expect(alone.players.map((p) => [p.handle, p.rank])).toEqual([['alice', 1]]);
+            expect(alone.you).toMatchObject({handle: 'alice', rank: 1, position: 1, page: 1});
+
+            await befriend('alice', 'carol');
+            // A request nobody has answered doesn't count.
+            await agents.alice.post('/friends/requests').send({handle: 'dave'}).expect(200);
+            const friends = (await agents.alice.get('/user/leaderboard').expect(200)).body;
+            const expected = everyone.filter((p) => ['alice', 'carol'].includes(p.handle)).map((p) => p.handle);
+            expect(friends.players.map((p) => p.handle)).toEqual(expected);
+            expect(friends.players.map((p) => p.position)).toEqual([1, 2]);
+            expect(friends.total).toBe(2);
+
+            // bob isn't alice's friend: he doesn't see her, and she doesn't see him.
+            const bob = (await agents.bob.get('/user/leaderboard').expect(200)).body;
+            expect(bob.players.map((p) => p.handle)).toEqual(['bob']);
+            // carol sees alice from her side of the friendship.
+            const carol = (await agents.carol.get('/user/leaderboard').expect(200)).body;
+            expect(carol.players.map((p) => p.handle).sort()).toEqual(['alice', 'carol']);
+
+            // Unfriending takes them off each other's boards.
+            await agents.carol.delete('/friends/alice').expect(204);
+            expect((await agents.alice.get('/user/leaderboard')).body.total).toBe(1);
+        });
+
+        test('Quick Match has a friends board too', async function () {
+            const {body} = await agents.alice.get('/matchmaking/leaderboard').expect(200);
+            expect(body).toMatchObject({scope: 'friends', players: [], you: null});
+        });
+
+        test('the global board is refused while GLOBAL_LEADERBOARD is off', async function () {
+            process.env.GLOBAL_LEADERBOARD = 'off';
+            try {
+                const response = await board('alice');
+                expect([response.status, response.body.error]).toEqual([403, 'GLOBAL_LEADERBOARD_DISABLED']);
+                const friends = (await agents.alice.get('/user/leaderboard').expect(200)).body;
+                expect(friends.scopes).toEqual(['friends']);
+            } finally {
+                process.env.GLOBAL_LEADERBOARD = 'on';
+            }
+        });
     });
 });

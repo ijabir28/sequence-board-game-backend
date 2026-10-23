@@ -2,6 +2,8 @@ const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_user = require('../database/users');
 const db_room = require('../database/rooms');
 const db_leaderboard = require('../database/leaderboard');
+const db_friends = require('../database/friends');
+const socket_server = require('../socket');
 const {UserError, real_email, validate_card_deck, validate_board_style} = require('../entity/user');
 const {check_avatar} = require('../entity/avatar');
 
@@ -10,6 +12,7 @@ const {check_avatar} = require('../entity/avatar');
 
 const STATUS_BY_ERROR = {
     NOT_SIGNED_IN: 401,
+    GLOBAL_LEADERBOARD_DISABLED: 403,
     IMAGE_TOO_LARGE: 413,
     UNSUPPORTED_MEDIA_TYPE: 415,
 };
@@ -41,6 +44,7 @@ function public_profile(user, stats) {
         image: user.image,
         card_deck: user.card_deck,
         board_style: user.board_style,
+        friends_can_watch: user.friends_can_watch,
         created_at: user.created_at,
         stats,
     };
@@ -119,6 +123,23 @@ async function set_board_style(req, res) {
     res.send({board_style: checked.board_style});
 }
 
+/**
+ * PUT /user/friends-can-watch {friends_can_watch}: 200 {friends_can_watch}. Whether friends get a link to watch the
+ * player's table games from their friends list; off by default. Their friends' lists are told to refresh.
+ */
+async function set_friends_can_watch(req, res) {
+    const user = await signed_in_user(req);
+    const value = req.body && req.body.friends_can_watch;
+    if (typeof value !== 'boolean') {
+        throw new UserError('INVALID_SETTING', 'Choose whether your friends can watch your games: on or off.');
+    }
+    await db_user.set_friends_can_watch({user_id: user.id, friends_can_watch: value});
+    res.send({friends_can_watch: value});
+    (await db_friends.list_friends({user_id: user.id})).forEach(function (friend) {
+        socket_server.send_to({handle: friend.handle, event: 'friends_updated', data: {}});
+    });
+}
+
 // The signed-in user's tables, newest first: where they sat and how far each game got.
 const ROOMS_PER_PAGE = {default: 10, max: 50};
 
@@ -147,26 +168,49 @@ async function current_game(req, res) {
 // The leaderboard, a page at a time. See database/leaderboard.js for how each period ranks players.
 const LEADERBOARD_PER_PAGE = {default: 20, max: 50};
 
+// Whose standings a board shows: `friends`, the player and their friends (always on), or `global`, every rated
+// player. The global board is off unless GLOBAL_LEADERBOARD is set to 1, true, yes or on (see render.yaml); its code
+// stays, so turning it back on is only that setting. Read on every request, so tests can switch it.
+function global_leaderboard_enabled() {
+    return /^(1|true|yes|on)$/i.test(String(process.env.GLOBAL_LEADERBOARD || '').trim());
+}
+
+function leaderboard_scopes() {
+    return global_leaderboard_enabled() ? ['friends', 'global'] : ['friends'];
+}
+
 /**
- * GET /user/leaderboard?period=all|week|day&page=1&per_page=20: one page of the board, best first, with the totals
- * for paging and `you`, the signed-in player's own entry (null when they aren't on this board), so the page can show
- * where they stand even when they are further down. `ladder` picks the board: private tables (`custom`, this
- * endpoint) or Quick Match (`matchmaking`, GET /matchmaking/leaderboard).
+ * GET /user/leaderboard?scope=friends|global&period=all|week|day&page=1&per_page=20: one page of the board, best
+ * first, with the totals for paging and `you`, the signed-in player's own entry (null when they aren't on this
+ * board), so the page can show where they stand even when they are further down. `scope` defaults to `friends`;
+ * `scopes` says which ones this server offers. `ladder` picks the board: private tables (`custom`, this endpoint) or
+ * Quick Match (`matchmaking`, GET /matchmaking/leaderboard).
  */
 function leaderboard_of(ladder) {
     return async function (req, res) {
         const user = await signed_in_user(req);
+        const scopes = leaderboard_scopes();
+        const scope = req.query.scope === undefined ? 'friends' : String(req.query.scope);
+        if (scope === 'global' && !scopes.includes('global')) {
+            throw new UserError('GLOBAL_LEADERBOARD_DISABLED', 'The leaderboard shows you and your friends. Add friends to see how you compare.');
+        }
+        if (!scopes.includes(scope)) {
+            throw new UserError('INVALID_SCOPE', 'Choose a leaderboard: your friends or everyone.');
+        }
         const period = req.query.period === undefined ? 'all' : String(req.query.period);
         if (!Object.prototype.hasOwnProperty.call(db_leaderboard.PERIODS, period)) {
             throw new UserError('INVALID_PERIOD', 'Choose a leaderboard period: all time, this week or today.');
         }
         const per_page = Math.min(positive_integer(req.query.per_page, LEADERBOARD_PER_PAGE.default), LEADERBOARD_PER_PAGE.max);
         const page = positive_integer(req.query.page, 1);
+        const friends_of = scope === 'friends' ? user.id : undefined;
         const [board, you] = await Promise.all([
-            db_leaderboard.list({period, ladder, limit: per_page, offset: (page - 1) * per_page}),
-            db_leaderboard.entry_for({period, ladder, user_id: user.id}),
+            db_leaderboard.list({period, ladder, friends_of, limit: per_page, offset: (page - 1) * per_page}),
+            db_leaderboard.entry_for({period, ladder, friends_of, user_id: user.id}),
         ]);
         res.send({
+            scope,
+            scopes,
             period,
             players: board.players,
             you: you === undefined ? null : Object.assign(you, {page: Math.ceil(you.position / per_page)}),
@@ -187,6 +231,7 @@ module.exports = {
     avatar: handler(avatar),
     set_card_deck: handler(set_card_deck),
     set_board_style: handler(set_board_style),
+    set_friends_can_watch: handler(set_friends_can_watch),
     rooms: handler(rooms),
     current_game: handler(current_game),
 };
