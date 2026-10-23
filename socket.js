@@ -2,6 +2,8 @@ const socket_io = require('socket.io');
 const presence = require('./controller/presence');
 const spectators = require('./controller/spectators');
 const online = require('./controller/online');
+const table_chat = require('./controller/table_chat');
+const db_room = require('./database/rooms');
 
 const socket = socket_io({
     serveClient: true,
@@ -27,7 +29,8 @@ async function identify(connection) {
     const {auth} = require('./auth');
     const {fromNodeHeaders} = require('better-auth/node');
     const session = await auth.api.getSession({headers: fromNodeHeaders(connection.request.headers)});
-    return session && session.user ? session.user.username : undefined;
+    if (!session || !session.user) return undefined;
+    return {handle: session.user.username, name: session.user.name || session.user.username};
 }
 
 // A game page says it is open with `join_game {room_id, handle, token}` (the token comes from that player's game
@@ -38,9 +41,15 @@ spectators.on_change(function (room_id, count) {
     broadcast({event: 'spectators_updated', data: {room_id, count}});
 });
 
+// The table's public chat and reactions (controller/table_chat.js): `open_table_chat {room_id}` from the lobby or the
+// game page, then `send_table_chat` and `send_table_reaction`, which go to everyone with the table open.
+async function room_exists(room_id) {
+    return (await db_room.get({id: room_id})) !== undefined;
+}
+
 socket.on('connection', function (connection) {
     const joined = new Map();
-    // The signed-in player's handle, once identified.
+    // The signed-in player, {handle, name}, once identified.
     let account;
     let closed = false;
 
@@ -48,12 +57,21 @@ socket.on('connection', function (connection) {
         .then(function (signed_in) {
             if (signed_in === undefined || closed) return;
             account = signed_in;
-            connection.join(user_room(account));
-            online.arrive({handle: account, connection: connection.id});
+            connection.join(user_room(account.handle));
+            online.arrive({handle: account.handle, connection: connection.id});
         })
         .catch(function (e) {
             console.error(e);
         });
+
+    table_chat.bind({
+        connection,
+        io: socket,
+        account: function () {
+            return account;
+        },
+        room_exists,
+    });
 
     connection.on('join_game', function (data) {
         const {room_id, handle, token} = data || {};
@@ -79,7 +97,7 @@ socket.on('connection', function (connection) {
 
     connection.on('disconnect', function () {
         closed = true;
-        if (account !== undefined) online.depart({handle: account, connection: connection.id});
+        if (account !== undefined) online.depart({handle: account.handle, connection: connection.id});
         spectators.drop(connection.id);
         joined.forEach(function (handle, room_id) {
             presence.depart({room_id, handle, connection: connection.id, grace_ms: presence.DISCONNECT_GRACE_MS});
