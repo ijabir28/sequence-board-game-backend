@@ -15,7 +15,8 @@ const HISTORY_LENGTH = 50;
 const MAX_TABLES = 500;
 // A socket can have a few tables open at once (several tabs share one socket), like spectators.js.
 const MAX_OPEN_PER_CONNECTION = 5;
-// Each account may send this many messages and reactions together in any RATE_WINDOW_MS.
+// Each account may send this many messages, and separately this many reactions, in any RATE_WINDOW_MS: tapping
+// reactions quickly never holds up the next message.
 const RATE_LIMIT = 8;
 const RATE_WINDOW_MS = 10000;
 const MAX_ROOM_ID_LENGTH = 80;
@@ -60,17 +61,18 @@ function clean_text(text) {
     return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Whether `handle` may send one more message or reaction now, counting it if so. */
-function take_turn(handle, now) {
-    const times = (sent.get(handle) || []).filter(function (at) {
+/** Whether `handle` may send one more of `kind` ('message' or 'reaction') now, counting it if so. */
+function take_turn(handle, kind, now) {
+    const key = `${kind}:${handle}`;
+    const times = (sent.get(key) || []).filter(function (at) {
         return now - at < RATE_WINDOW_MS;
     });
     if (times.length >= RATE_LIMIT) {
-        sent.set(handle, times);
+        sent.set(key, times);
         return false;
     }
     times.push(now);
-    sent.set(handle, times);
+    sent.set(key, times);
     return true;
 }
 
@@ -99,7 +101,7 @@ function post_message({room_id, author, text, now = Date.now()}) {
     const clean = clean_text(text);
     if (clean.length === 0) return failure('EMPTY');
     if (clean.length > MAX_TEXT_LENGTH) return failure('TOO_LONG');
-    if (!take_turn(author.handle, now)) return failure('TOO_FAST');
+    if (!take_turn(author.handle, 'message', now)) return failure('TOO_FAST');
     const message = {id: next_id(now), author: {handle: author.handle, name: author.name}, text: clean, at: new Date(now).toISOString()};
     remember(room_id, message);
     return {message};
@@ -110,7 +112,7 @@ function react({room_id, author, reaction, now = Date.now()}) {
     if (author === undefined) return failure('NOT_SIGNED_IN');
     if (!is_room_id(room_id)) return failure('NOT_AT_TABLE');
     if (!REACTIONS.includes(reaction)) return failure('UNKNOWN_REACTION');
-    if (!take_turn(author.handle, now)) return failure('TOO_FAST');
+    if (!take_turn(author.handle, 'reaction', now)) return failure('TOO_FAST');
     return {reaction: {id: next_id(now), author: {handle: author.handle, name: author.name}, reaction, at: new Date(now).toISOString()}};
 }
 

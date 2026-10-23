@@ -72,13 +72,16 @@ describe('table chat', function () {
         expect(kept[0].text).toBe('m5');
     });
 
-    test('limits how fast one account sends, messages and reactions together', function () {
-        for (let i = 0; i < table_chat.RATE_LIMIT - 1; i++) {
+    test('limits how fast one account sends messages, and reactions apart from them', function () {
+        for (let i = 0; i < table_chat.RATE_LIMIT; i++) {
+            expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'clap', now: 1000}).reaction).toBeDefined();
+        }
+        expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'clap', now: 1000}).error).toBe('TOO_FAST');
+        // Tapping reactions quickly doesn't hold up a message.
+        for (let i = 0; i < table_chat.RATE_LIMIT; i++) {
             expect(table_chat.post_message({room_id: 'otter-1', author: ADA, text: 'hi', now: 1000}).message).toBeDefined();
         }
-        expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'clap', now: 1000}).reaction).toBeDefined();
         expect(table_chat.post_message({room_id: 'otter-1', author: ADA, text: 'hi', now: 1000}).error).toBe('TOO_FAST');
-        expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'clap', now: 1000}).error).toBe('TOO_FAST');
         // Someone else isn't held up, and the account may go on once the window has passed.
         expect(table_chat.post_message({room_id: 'otter-1', author: BEN, text: 'hi', now: 1000}).message).toBeDefined();
         expect(table_chat.post_message({room_id: 'otter-1', author: ADA, text: 'hi', now: 1000 + table_chat.RATE_WINDOW_MS}).message).toBeDefined();

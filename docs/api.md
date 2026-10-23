@@ -547,7 +547,7 @@ account of the socket that sent it and `at` an ISO time. Every message and react
 no private or direct message between players (so nobody can pass hints about their hand), and fields other than
 `room_id` and `text` / `reaction` are ignored. The text is one line, at most 200 characters, with runs of whitespace
 collapsed. Errors: `NOT_SIGNED_IN` (only signed-in accounts speak; anyone with the link reads), `NOT_AT_TABLE` (send
-`open_table_chat` first), `EMPTY`, `TOO_LONG`, `UNKNOWN_REACTION`, `TOO_FAST` (more than 8 messages and reactions in
+`open_table_chat` first), `EMPTY`, `TOO_LONG`, `UNKNOWN_REACTION`, `TOO_FAST` (more than 8 messages, or 8 reactions, in
 10 seconds). The chat is kept in memory, so it starts empty again after a restart.
 
 No other client → server events are handled. For the legacy game there are no events, so clients must re-fetch
