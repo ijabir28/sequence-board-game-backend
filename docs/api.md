@@ -523,6 +523,9 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
 | `friends_updated` | `{}` | Only to the sockets of a player whose friends, requests or invitations changed: re-fetch `GET /friends/list` |
 | `table_invitation` | `{room_id, room_name, from: {handle, name, image}}` | Only to the invited friend's sockets |
+| `table_chat_history` | `{room_id, messages: [Message]}` | Only to the socket that sent `open_table_chat`: the table's last 50 messages, oldest first |
+| `table_chat` | `{room_id, message: Message}` | Someone said something at the table. Sent to **every** socket with that table's chat open, the sender's too |
+| `table_reaction` | `{room_id, reaction: {id, author: {handle, name}, reaction, at}}` | Someone reacted at the table, sent like `table_chat`. Reactions are not kept |
 | `signed_in_elsewhere` | `{handle}` | That account signed in on a device and its other sessions were deleted. A page signed in as `handle` should re-check its session (`GET /user/profile`): the event is public, so it proves nothing by itself |
 
 Who a socket is (for the two events sent to one player) is read from the session cookie of its handshake when it
@@ -534,6 +537,18 @@ connects; a page whose player signs in or out should reconnect.
 | `leave_game` | `{room_id}` | This socket closed the game (left the game page) |
 | `watch_game` | `{room_id}` | This socket watches the table's game without a seat, so it is counted in `spectators`. Needs no sign-in; a socket counts at up to 5 tables |
 | `unwatch_game` | `{room_id}` | This socket stopped watching (a dropped socket stops at once) |
+| `open_table_chat` | `{room_id}` | This socket has the table open (its lobby or its game, seated or not) and hears its chat. Needs no sign-in; a socket has up to 5 tables open; an unknown table is ignored |
+| `close_table_chat` | `{room_id}` | This socket stopped hearing the table's chat (a dropped socket stops at once) |
+| `send_table_chat` | `{room_id, text}`, ack | Say `text` at the table. Acknowledged with `{ok: true}` or `{error, message}` |
+| `send_table_reaction` | `{room_id, reaction}`, ack | React at the table, `reaction` one of `wow`, `clap`, `party`, `fire`, `laugh`, `heart`. Acknowledged like `send_table_chat` |
+
+**Table chat is public.** A message is `{id, author: {handle, name}, text, at}`, where `author` is the signed-in
+account of the socket that sent it and `at` an ISO time. Every message and reaction goes to the whole table: there is
+no private or direct message between players (so nobody can pass hints about their hand), and fields other than
+`room_id` and `text` / `reaction` are ignored. The text is one line, at most 200 characters, with runs of whitespace
+collapsed. Errors: `NOT_SIGNED_IN` (only signed-in accounts speak; anyone with the link reads), `NOT_AT_TABLE` (send
+`open_table_chat` first), `EMPTY`, `TOO_LONG`, `UNKNOWN_REACTION`, `TOO_FAST` (more than 8 messages, or 8 reactions, in
+10 seconds). The chat is kept in memory, so it starts empty again after a restart.
 
 No other client → server events are handled. For the legacy game there are no events, so clients must re-fetch
 `/board/deck` and `/game/hand_cards` themselves.
