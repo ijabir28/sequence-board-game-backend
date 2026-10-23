@@ -2,6 +2,7 @@ const {SERVER_ERROR_MESSAGE} = require('./errors');
 const db_room = require('../database/rooms');
 const db_user = require('../database/users');
 const db_game = require('../database/games');
+const db_friends = require('../database/friends');
 const {transaction} = require('../database/pool');
 const {is_supported_table} = require('../entity/sequence_game');
 const {RoomError, normalize_name, generate_slug, parse_settings, shuffle_seats} = require('../entity/room');
@@ -80,6 +81,8 @@ async function join(req, res) {
                 throw 'GAME_ALREADY_STARTED';
             }
             await db_room.join({id, team_handle: req.body.team_handle, user, client});
+            // Sitting down answers a friend's invitation to this table.
+            await db_friends.dismiss_invitation({user_id: user.id, room_id: id, client});
         });
     } catch (e) {
         if (typeof e !== 'string') throw e;
