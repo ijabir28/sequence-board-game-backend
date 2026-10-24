@@ -155,10 +155,13 @@ describe_with_database('friends', function () {
             expect((await agents.ann.post(`/room/${id}/invite`).send({handle: 'ben'})).body.error).toBe('GAME_ALREADY_STARTED');
 
             // A seat alone isn't playing: ben hasn't the app open, so he's offline, though his game goes on.
-            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, playing: false, watch: null})]);
-            // With the app open but the game closed (the lobby, another tab), he's online and not playing.
-            online.arrive({handle: 'ben', connection: 'ben-socket'});
-            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, playing: false})]);
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, away: false, playing: false, watch: null})]);
+            // With the app open but hidden (another tab, a locked phone), he's away.
+            online.arrive({handle: 'ben', connection: 'ben-socket', away: true});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, away: true, playing: false})]);
+            // In view but with the game closed (the lobby), he's online and not playing.
+            online.set_away({handle: 'ben', connection: 'ben-socket', away: false});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, away: false, playing: false})]);
             presence.arrive({room_id: id, handle: 'ben', connection: 'ben-socket'});
             // ann's list says ben is playing, but not where: he hasn't let friends watch.
             expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, playing: true, watch: null})]);

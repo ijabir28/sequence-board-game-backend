@@ -75,20 +75,22 @@ function public_player({handle, name, image}) {
 }
 
 // A friend as the list shows them. A seat at an unfinished game alone isn't playing: a player who closed the app
-// keeps theirs. They play while their game page is open there, which needs the app open too.
+// keeps theirs. They play while their game page is open there, which needs the app open and in view too.
 function friend_status({friends_can_watch, games, ...friend}) {
-    const is_online = online.is_online(friend.handle);
-    const at = is_online ? games.find((room_id) => presence.is_present(room_id, friend.handle)) : undefined;
+    const status = online.status(friend.handle);
+    const at = status === 'online' ? games.find((room_id) => presence.is_present(room_id, friend.handle)) : undefined;
     return Object.assign(friend, {
-        online: is_online,
+        online: status === 'online',
+        away: status === 'away',
         playing: at !== undefined,
         watch: at !== undefined && friends_can_watch ? at : null,
     });
 }
 
 /**
- * GET /friends/list: 200 {friends: [{handle, name, image, since, online, playing, watch}], incoming, outgoing,
- * invitations}. `online` says whether the friend has the app open (controller/online.js); `playing` whether they are at
+ * GET /friends/list: 200 {friends: [{handle, name, image, since, online, away, playing, watch}], incoming, outgoing,
+ * invitations}. `online` says whether the friend has the app open and in view, `away` whether it is open but hidden
+ * or was until a moment ago (controller/online.js); `playing` whether they are at
  * a table game in progress right now (controller/presence.js), not merely seated at one they walked away from; `watch`
  * is that game's code while they play there, only when the friend lets friends watch (PUT /user/friends-can-watch),
  * else null; `incoming` and `outgoing` are

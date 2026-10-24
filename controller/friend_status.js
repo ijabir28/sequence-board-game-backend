@@ -1,6 +1,6 @@
 const db_friends = require('../database/friends');
 
-// Tells a player's friends when their status on the friends list changes: they came online or went offline
+// Tells a player's friends when their status on the friends list changes: they came online, went away or offline
 // (controller/online.js), or sat down at or walked away from their game (controller/presence.js). Friends who have the
 // app open hear `friends_updated` and read the list again. A burst of changes (a page reload drops and reopens the
 // socket, then rejoins the game) is told once, after it settles.
@@ -27,7 +27,7 @@ async function tell_friends(handle) {
     const socket_server = require('../socket');
     const online = require('./online');
     (await db_friends.friend_handles({handle})).forEach(function (friend) {
-        if (online.is_online(friend)) socket_server.send_to({handle: friend, event: 'friends_updated', data: {}});
+        if (online.is_connected(friend)) socket_server.send_to({handle: friend, event: 'friends_updated', data: {}});
     });
 }
 
