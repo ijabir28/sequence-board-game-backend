@@ -2,6 +2,7 @@ const socket_io = require('socket.io');
 const presence = require('./controller/presence');
 const spectators = require('./controller/spectators');
 const online = require('./controller/online');
+const friend_status = require('./controller/friend_status');
 const table_chat = require('./controller/table_chat');
 const db_room = require('./database/rooms');
 
@@ -33,6 +34,10 @@ async function identify(connection) {
     return {handle: session.user.username, name: session.user.name || session.user.username};
 }
 
+// A page says whether it is hidden with `set_away {away}` (controller/online.js): its player is away while all their
+// pages are. Their friends hear `friends_updated` whenever their status changes (controller/friend_status.js).
+online.on_change(friend_status.changed);
+
 // A game page says it is open with `join_game {room_id, handle, token}` (the token comes from that player's game
 // view) and closed with `leave_game {room_id}`. A socket that drops counts as having left after a short grace period.
 // Anyone with a table's link may watch its game, seated or not and signed in or not: `watch_game {room_id}` and
@@ -51,6 +56,8 @@ socket.on('connection', function (connection) {
     const joined = new Map();
     // The signed-in player, {handle, name}, once identified.
     let account;
+    // Whether the page is hidden (`set_away`), which may arrive before the player is identified.
+    let away = false;
     let closed = false;
 
     identify(connection)
@@ -58,7 +65,7 @@ socket.on('connection', function (connection) {
             if (signed_in === undefined || closed) return;
             account = signed_in;
             connection.join(user_room(account.handle));
-            online.arrive({handle: account.handle, connection: connection.id});
+            online.arrive({handle: account.handle, connection: connection.id, away});
         })
         .catch(function (e) {
             console.error(e);
@@ -71,6 +78,11 @@ socket.on('connection', function (connection) {
             return account;
         },
         room_exists,
+    });
+
+    connection.on('set_away', function (data) {
+        away = Boolean(data && data.away);
+        if (account !== undefined) online.set_away({handle: account.handle, connection: connection.id, away});
     });
 
     connection.on('join_game', function (data) {

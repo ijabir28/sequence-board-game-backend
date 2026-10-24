@@ -9,6 +9,8 @@ const describe_with_database = has_database ? describe : describe.skip;
 describe_with_database('friends', function () {
     let database;
     let app;
+    let online;
+    let presence;
     const agents = {};
 
     async function sign_up(handle, name = `P ${handle}`) {
@@ -26,6 +28,9 @@ describe_with_database('friends', function () {
     beforeAll(async function () {
         database = await use_test_schema('friends');
         app = require('../app');
+        // Only now: presence.js loads auth.js, which must see the test schema.
+        online = require('./online');
+        presence = require('./presence');
         for (const handle of ['ann', 'ben', 'cat', 'dan', 'eve']) await sign_up(handle);
         await sign_up('zed_one', 'Annabel');
     });
@@ -149,8 +154,17 @@ describe_with_database('friends', function () {
             await agents.ann.post(`/room/${id}/start`).expect(200);
             expect((await agents.ann.post(`/room/${id}/invite`).send({handle: 'ben'})).body.error).toBe('GAME_ALREADY_STARTED');
 
+            // A seat alone isn't playing: ben hasn't the app open, so he's offline, though his game goes on.
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, away: false, playing: false, watch: null})]);
+            // With the app open but hidden (another tab, a locked phone), he's away.
+            online.arrive({handle: 'ben', connection: 'ben-socket', away: true});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, away: true, playing: false})]);
+            // In view but with the game closed (the lobby), he's online and not playing.
+            online.set_away({handle: 'ben', connection: 'ben-socket', away: false});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, away: false, playing: false})]);
+            presence.arrive({room_id: id, handle: 'ben', connection: 'ben-socket'});
             // ann's list says ben is playing, but not where: he hasn't let friends watch.
-            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: null})]);
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, playing: true, watch: null})]);
             expect((await agents.ben.get('/user/profile')).body.friends_can_watch).toBe(false);
             const bad = await agents.ben.put('/user/friends-can-watch').send({friends_can_watch: 'yes'});
             expect([bad.status, bad.body.error]).toEqual([400, 'INVALID_SETTING']);
@@ -159,8 +173,17 @@ describe_with_database('friends', function () {
                 .toEqual({friends_can_watch: true});
             expect((await agents.ben.get('/user/profile')).body.friends_can_watch).toBe(true);
             expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: id})]);
+            // Walking away from the table (or the app) takes the link away with the status.
+            presence.depart({room_id: id, handle: 'ben', connection: 'ben-socket'});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: true, playing: false, watch: null})]);
+            presence.arrive({room_id: id, handle: 'ben', connection: 'ben-socket'});
+            online.depart({handle: 'ben', connection: 'ben-socket'});
+            expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', online: false, playing: false, watch: null})]);
+            online.arrive({handle: 'ben', connection: 'ben-socket'});
             await agents.ben.put('/user/friends-can-watch').send({friends_can_watch: false}).expect(200);
             expect((await overview('ann')).friends).toEqual([expect.objectContaining({handle: 'ben', playing: true, watch: null})]);
+            online.reset();
+            presence.reset();
             expect((await request(app).put('/user/friends-can-watch').send({friends_can_watch: true})).status).toBe(401);
             // dan still has cat's open table.
             expect((await overview('dan')).invitations.map((i) => i.room_id)).toEqual([other]);

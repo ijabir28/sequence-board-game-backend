@@ -5,6 +5,7 @@ const db_game = require('../database/games');
 const {transaction} = require('../database/pool');
 const {FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_handle} = require('../entity/friends');
 const online = require('./online');
+const presence = require('./presence');
 const socket_server = require('../socket');
 
 // Friends: finding players, asking them to be friends, answering, unfriending, and inviting a friend to a table.
@@ -73,10 +74,26 @@ function public_player({handle, name, image}) {
     return {handle, name, image};
 }
 
+// A friend as the list shows them. A seat at an unfinished game alone isn't playing: a player who closed the app
+// keeps theirs. They play while their game page is open there, which needs the app open and in view too.
+function friend_status({friends_can_watch, games, ...friend}) {
+    const status = online.status(friend.handle);
+    const at = status === 'online' ? games.find((room_id) => presence.is_present(room_id, friend.handle)) : undefined;
+    return Object.assign(friend, {
+        online: status === 'online',
+        away: status === 'away',
+        playing: at !== undefined,
+        watch: at !== undefined && friends_can_watch ? at : null,
+    });
+}
+
 /**
- * GET /friends/list: 200 {friends: [{handle, name, image, since, online, playing, watch}], incoming, outgoing,
- * invitations}. `playing` says whether the friend has a seat at a table game in progress; `watch` is its code, only when
- * the friend lets friends watch (PUT /user/friends-can-watch), else null; `incoming` and `outgoing` are
+ * GET /friends/list: 200 {friends: [{handle, name, image, since, online, away, playing, watch}], incoming, outgoing,
+ * invitations}. `online` says whether the friend has the app open and in view, `away` whether it is open but hidden
+ * or was until a moment ago (controller/online.js); `playing` whether they are at
+ * a table game in progress right now (controller/presence.js), not merely seated at one they walked away from; `watch`
+ * is that game's code while they play there, only when the friend lets friends watch (PUT /user/friends-can-watch),
+ * else null; `incoming` and `outgoing` are
  * requests waiting, [{handle, name, image, sent_at}]; `invitations` are tables friends asked the player to, still open.
  */
 async function overview(req, res) {
@@ -87,9 +104,7 @@ async function overview(req, res) {
         db_friends.list_invitations({user_id: me.id}),
     ]);
     res.send({
-        friends: friends.map(function (friend) {
-            return Object.assign(friend, {online: online.is_online(friend.handle)});
-        }),
+        friends: friends.map(friend_status),
         incoming: requests.incoming,
         outgoing: requests.outgoing,
         invitations,
