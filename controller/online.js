@@ -9,18 +9,22 @@ function is_online(handle) {
     return sockets.has(handle);
 }
 
-/** `connection` (a socket id) is signed in as `handle`. */
+/** `connection` (a socket id) is signed in as `handle`. Returns whether that brought them online. */
 function arrive({handle, connection}) {
-    if (!sockets.has(handle)) sockets.set(handle, new Set());
+    const arrived = !sockets.has(handle);
+    if (arrived) sockets.set(handle, new Set());
     sockets.get(handle).add(connection);
+    return arrived;
 }
 
-/** `connection` closed. */
+/** `connection` closed. Returns whether that took them offline. */
 function depart({handle, connection}) {
     const connections = sockets.get(handle);
-    if (connections === undefined) return;
+    if (connections === undefined) return false;
     connections.delete(connection);
-    if (connections.size === 0) sockets.delete(handle);
+    if (connections.size > 0) return false;
+    sockets.delete(handle);
+    return true;
 }
 
 /** Forgets everyone (for tests). */

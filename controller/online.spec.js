@@ -7,16 +7,17 @@ describe('online', function () {
 
     test('a player is online while any of their sockets is connected', function () {
         expect(online.is_online('ann')).toBe(false);
-        online.arrive({handle: 'ann', connection: 'a'});
-        online.arrive({handle: 'ann', connection: 'b'});
-        online.depart({handle: 'ann', connection: 'a'});
+        // Only the first socket in and the last one out change anything, and say so.
+        expect(online.arrive({handle: 'ann', connection: 'a'})).toBe(true);
+        expect(online.arrive({handle: 'ann', connection: 'b'})).toBe(false);
+        expect(online.depart({handle: 'ann', connection: 'a'})).toBe(false);
         expect(online.is_online('ann')).toBe(true);
-        online.depart({handle: 'ann', connection: 'b'});
+        expect(online.depart({handle: 'ann', connection: 'b'})).toBe(true);
         expect(online.is_online('ann')).toBe(false);
     });
 
     test('a socket that was never counted changes nothing', function () {
-        online.depart({handle: 'ben', connection: 'x'});
+        expect(online.depart({handle: 'ben', connection: 'x'})).toBe(false);
         expect(online.is_online('ben')).toBe(false);
     });
 });

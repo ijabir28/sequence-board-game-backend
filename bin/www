@@ -10,6 +10,7 @@ const {migrate} = require('../database/migrate');
 const {start_turn_timer, start_bot_players, presence_changed} = require('../controller/room_game');
 const {start_matchmaking} = require('../controller/matchmaking');
 const presence = require('../controller/presence');
+const friend_status = require('../controller/friend_status');
 const debug = require('debug')('sequence-board-game:server');
 const http = require('http');
 
@@ -39,8 +40,9 @@ with_direct_pool(function (pool) {
         // Bots move at their tables, and the Quick Match queue seats players (with bots after two minutes' wait).
         start_bot_players();
         start_matchmaking();
-        // A player leaving or coming back to their table pauses or resumes their turn.
-        presence.on_change(function (room_id) {
+        // A player leaving or coming back to their table pauses or resumes their turn, and their friends' lists say so.
+        presence.on_change(function (room_id, handle) {
+            friend_status.changed(handle);
             presence_changed(room_id).catch(function (e) {
                 console.error(`Could not follow who is at ${room_id}:`, e.message);
             });

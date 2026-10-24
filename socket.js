@@ -2,6 +2,7 @@ const socket_io = require('socket.io');
 const presence = require('./controller/presence');
 const spectators = require('./controller/spectators');
 const online = require('./controller/online');
+const friend_status = require('./controller/friend_status');
 const table_chat = require('./controller/table_chat');
 const db_room = require('./database/rooms');
 
@@ -58,7 +59,7 @@ socket.on('connection', function (connection) {
             if (signed_in === undefined || closed) return;
             account = signed_in;
             connection.join(user_room(account.handle));
-            online.arrive({handle: account.handle, connection: connection.id});
+            if (online.arrive({handle: account.handle, connection: connection.id})) friend_status.changed(account.handle);
         })
         .catch(function (e) {
             console.error(e);
@@ -97,7 +98,9 @@ socket.on('connection', function (connection) {
 
     connection.on('disconnect', function () {
         closed = true;
-        if (account !== undefined) online.depart({handle: account.handle, connection: connection.id});
+        if (account !== undefined && online.depart({handle: account.handle, connection: connection.id})) {
+            friend_status.changed(account.handle);
+        }
         spectators.drop(connection.id);
         joined.forEach(function (handle, room_id) {
             presence.depart({room_id, handle, connection: connection.id, grace_ms: presence.DISCONNECT_GRACE_MS});
