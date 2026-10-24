@@ -3,14 +3,14 @@
 const request = require('supertest');
 const {has_database, use_test_schema} = require('../database/test_database');
 const {verified_account} = require('./test_accounts');
-const online = require('./online');
-const presence = require('./presence');
 
 const describe_with_database = has_database ? describe : describe.skip;
 
 describe_with_database('friends', function () {
     let database;
     let app;
+    let online;
+    let presence;
     const agents = {};
 
     async function sign_up(handle, name = `P ${handle}`) {
@@ -28,6 +28,9 @@ describe_with_database('friends', function () {
     beforeAll(async function () {
         database = await use_test_schema('friends');
         app = require('../app');
+        // Only now: presence.js loads auth.js, which must see the test schema.
+        online = require('./online');
+        presence = require('./presence');
         for (const handle of ['ann', 'ben', 'cat', 'dan', 'eve']) await sign_up(handle);
         await sign_up('zed_one', 'Annabel');
     });
