@@ -66,11 +66,11 @@ function normalize_name(name, random = Math.random) {
         return generate_name(random);
     }
     if (typeof name !== 'string') {
-        throw new RoomError('INVALID_NAME', 'A table name must be text.');
+        throw new RoomError('INVALID_NAME', 'A room name must be text.');
     }
     const normalized = name.trim().replace(/\s+/g, ' ');
     if (normalized.length > NAME_MAX_LENGTH) {
-        throw new RoomError('INVALID_NAME', `A table name can be at most ${NAME_MAX_LENGTH} characters.`);
+        throw new RoomError('INVALID_NAME', `A room name can be at most ${NAME_MAX_LENGTH} characters.`);
     }
     return normalized;
 }
