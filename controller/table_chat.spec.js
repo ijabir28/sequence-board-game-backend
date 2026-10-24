@@ -89,6 +89,7 @@ describe('table chat', function () {
 
     test('reactions must be one of the table\'s and are not kept', function () {
         expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'fire'}).reaction).toMatchObject({author: ADA, reaction: 'fire'});
+        expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: 'high_five'}).reaction).toMatchObject({reaction: 'high_five'});
         expect(table_chat.react({room_id: 'otter-1', author: ADA, reaction: '<script>'}).error).toBe('UNKNOWN_REACTION');
         expect(table_chat.history('otter-1')).toEqual([]);
     });
