@@ -217,10 +217,10 @@ async function invite(req, res) {
     const room = await transaction(async function (client) {
         const room = await db_room.get({id, client, lock: true});
         if (room === undefined) {
-            throw new FriendError('ROOM_NOT_FOUND', 'There is no table with that code.');
+            throw new FriendError('ROOM_NOT_FOUND', 'There is no room with that code.');
         }
         if (room.administrator !== me.handle && !db_room.is_seated(room, me.handle)) {
-            throw new FriendError('NOT_AT_TABLE', 'Take a seat at this table before inviting friends to it.');
+            throw new FriendError('NOT_AT_TABLE', 'Take a seat in this room before inviting friends to it.');
         }
         if (room.matchmaking || await db_game.get({room_id: id, client}) !== undefined) {
             throw new FriendError('GAME_ALREADY_STARTED', "The game has started, so nobody new can sit down.");
@@ -229,10 +229,10 @@ async function invite(req, res) {
             throw new FriendError('NOT_FRIENDS', `Add ${friend.name} as a friend first, then you can invite them.`);
         }
         if (db_room.is_seated(room, friend.handle)) {
-            throw new FriendError('ALREADY_SEATED', `${friend.name} already has a seat at this table.`);
+            throw new FriendError('ALREADY_SEATED', `${friend.name} already has a seat in this room.`);
         }
         if (db_room.is_full(room)) {
-            throw new FriendError('TABLE_FULL', 'Every seat at this table is taken.');
+            throw new FriendError('TABLE_FULL', 'Every seat in this room is taken.');
         }
         await db_friends.invite({room_id: room.id, inviter_id: me.id, invitee_id: friend.id, client});
         return room;

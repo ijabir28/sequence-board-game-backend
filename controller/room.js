@@ -15,7 +15,7 @@ const socket_server = require('../socket');
 async function create(req, res) {
     const administrator = await db_user.get_user({handle: req.handle});
     if (administrator === undefined) {
-        return res.status(401).send({error: 'NOT_SIGNED_IN', message: 'Sign in to open a table.'});
+        return res.status(401).send({error: 'NOT_SIGNED_IN', message: 'Sign in to open a room.'});
     }
     const team_count = Number(req.body.number_of_team);
     const players_per_team = Number(req.body.number_of_player_in_each_team);
@@ -47,19 +47,19 @@ async function create(req, res) {
 async function update_settings(req, res) {
     const handle = req.handle;
     if (handle === undefined) {
-        throw new RoomError('NOT_SIGNED_IN', 'Sign in to change this table.');
+        throw new RoomError('NOT_SIGNED_IN', 'Sign in to change this room.');
     }
     const {id} = req.params;
     await transaction(async function (client) {
         const room = await db_room.get({id, client, lock: true});
         if (room === undefined) {
-            throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
+            throw new RoomError('ROOM_NOT_FOUND', 'There is no room with that code.');
         }
         if (room.administrator !== handle) {
-            throw new RoomError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, can change its settings.`);
+            throw new RoomError('NOT_HOST', `Only ${room.administrator_name}, who opened this room, can change its settings.`);
         }
         if (await db_game.get({room_id: id, client}) !== undefined) {
-            throw new RoomError('GAME_ALREADY_STARTED', "The game has started, so the table's settings are fixed.");
+            throw new RoomError('GAME_ALREADY_STARTED', "The game has started, so the room's settings are fixed.");
         }
         const name = req.body.name === undefined ? room.name : normalize_name(req.body.name);
         await db_room.update({id, name, settings: parse_settings(req.body, room.settings), client});
@@ -105,7 +105,7 @@ async function leave(req, res) {
     await transaction(async function (client) {
         const room = await db_room.get({id, client, lock: true});
         if (room === undefined) {
-            throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
+            throw new RoomError('ROOM_NOT_FOUND', 'There is no room with that code.');
         }
         if (await db_game.get({room_id: id, client}) !== undefined) {
             throw new RoomError('GAME_ALREADY_STARTED', 'The game has started, so the seats are fixed.');
@@ -113,7 +113,7 @@ async function leave(req, res) {
         try {
             await db_room.leave({id, user, client});
         } catch (e) {
-            if (e === 'NOT_SEATED') throw new RoomError('NOT_SEATED', "You don't have a seat at this table.");
+            if (e === 'NOT_SEATED') throw new RoomError('NOT_SEATED', "You don't have a seat in this room.");
             throw e;
         }
     });
@@ -131,10 +131,10 @@ async function shuffle(req, res) {
     const host = await transaction(async function (client) {
         const room = await db_room.get({id, client, lock: true});
         if (room === undefined) {
-            throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
+            throw new RoomError('ROOM_NOT_FOUND', 'There is no room with that code.');
         }
         if (room.administrator !== handle) {
-            throw new RoomError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, can shuffle the teams.`);
+            throw new RoomError('NOT_HOST', `Only ${room.administrator_name}, who opened this room, can shuffle the teams.`);
         }
         if (await db_game.get({room_id: id, client}) !== undefined) {
             throw new RoomError('GAME_ALREADY_STARTED', 'The game has started, so the seats are fixed.');

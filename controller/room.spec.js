@@ -271,7 +271,7 @@ describe_with_database('rooms and table games', function () {
             const seated_guest = await agents.bob.post(`/room/${id}/start`);
             expect([seated_guest.status, seated_guest.body.error]).toEqual([403, 'NOT_HOST']);
             // Players are addressed by their display name, not their handle.
-            expect(seated_guest.body.message).toBe('Only P alice, who opened this table, can start its game.');
+            expect(seated_guest.body.message).toBe('Only P alice, who opened this room, can start its game.');
             expect((await request(app).get(`/room/${id}`)).body).toMatchObject({administrator: 'alice', administrator_name: 'P alice'});
 
             const started = await agents.alice.post(`/room/${id}/start`);
