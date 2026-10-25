@@ -135,27 +135,28 @@ describe_with_database('host controls', function () {
 
     test('a dismissed invitation can be sent again only after a wait that grows, at most five times', async function () {
         const id = await open_room();
-        // As if the last dismissal was `minutes` ago.
-        const age = (minutes) => database.pool.query(
-            "UPDATE table_invitation_dismissals SET last_dismissed_at = now() - make_interval(mins => $2) WHERE room_id = $1", [id, minutes]);
+        // As if the last dismissal was `seconds` ago.
+        const age = (seconds) => database.pool.query(
+            "UPDATE table_invitation_dismissals SET last_dismissed_at = now() - make_interval(secs => $2) WHERE room_id = $1", [id, seconds]);
         const invite = () => agents.host.post(`/room/${id}/invite`).send({handle: 'cat'});
-        for (const [i, minutes] of [5, 15, 30, 60, 120].entries()) {
+        for (const [i, seconds] of [10, 30, 60, 180, 300].entries()) {
             await invite().expect(200);
             await agents.cat.delete(`/friends/invitations/${id}`).expect(204);
             const refused = await invite();
             expect([refused.status, refused.body.error]).toEqual([429, 'INVITE_COOLDOWN']);
-            expect(refused.body.message).toMatch(`again in ${['5 minutes', '15 minutes', '30 minutes', '1 hour', '2 hours'][i]}`);
+            // Seconds count down between the dismissal and the refusal, so the first two read a little under.
+            expect(refused.body.message).toMatch([/again in \d+ seconds/, /again in \d+ seconds/, /again in 1 minute\./, /again in 3 minutes/, /again in 5 minutes/][i]);
             const status = (await agents.host.get(`/room/${id}/invite-status`).expect(200)).body;
             expect(status.dismissed).toEqual([expect.objectContaining({handle: 'cat', dismissals: i + 1, limit_reached: false})]);
             expect(status.dismissed[0].retry_at).not.toBeNull();
-            await age(minutes - 1);
+            await age(seconds - 5);
             expect((await invite()).body.error).toBe('INVITE_COOLDOWN');
-            await age(minutes);
+            await age(seconds);
         }
         // The sixth invitation (the fifth re-invite) is the last one.
         await invite().expect(200);
         await agents.cat.delete(`/friends/invitations/${id}`).expect(204);
-        await age(10000);
+        await age(600000);
         const refused = await invite();
         expect([refused.status, refused.body.error]).toEqual([409, 'INVITE_LIMIT']);
         expect((await agents.host.get(`/room/${id}/invite-status`)).body.dismissed[0]).toMatchObject({retry_at: null, limit_reached: true});
@@ -177,6 +178,23 @@ describe_with_database('host controls', function () {
         // The host invites ben back: he may sit down again.
         await agents.host.post(`/room/${id}/invite`).send({handle: 'ben'}).expect(200);
         expect((await agents.host.get(`/room/${id}/invite-status`)).body.removed).toEqual([]);
+        expect(await join('ben', id, 'TEAM_2')).toBe('success');
+    });
+
+    test('a removed player the host invited back joins by asking, without waiting for an answer', async function () {
+        const id = await open_room();
+        expect(await join('ben', id, 'TEAM_2')).toBe('success');
+        await agents.host.post(`/room/${id}/kick`).send({handle: 'ben'}).expect(200);
+        await agents.host.post(`/room/${id}/invite`).send({handle: 'ben'}).expect(200);
+        expect((await agents.ben.post(`/room/${id}/rejoin`).expect(200)).body).toEqual({removed: false, requested: false, declined: false, joined: true});
+        const room = (await agents.host.get(`/room/${id}`).expect(200)).body;
+        expect(room.standing.map((p) => p.handle)).toEqual(['ben']);
+        expect(room.invited).toEqual([]);
+        // Taking the invitation isn't turning it down, and the host had nothing to answer.
+        expect((await agents.host.get(`/room/${id}/invite-status`)).body).toEqual({dismissed: [], removed: []});
+        expect((await agents.host.get(`/room/${id}/removed`)).body.removed).toEqual([]);
+        // With the invitation taken, there is nothing left to ask for.
+        expect((await agents.ben.post(`/room/${id}/rejoin`)).body.error).toBe('NOT_REMOVED');
         expect(await join('ben', id, 'TEAM_2')).toBe('success');
     });
 

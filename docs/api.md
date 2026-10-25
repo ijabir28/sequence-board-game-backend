@@ -227,8 +227,8 @@ Ends the friendship (and drops invitations between the two): `204`, or `403 NOT_
 
 ### `GET /friends/invitations` (auth) · `DELETE /friends/invitations/:room_id` (auth)
 The `invitations` of `GET /friends/list`; dismissing one is `204`, or `404 INVITATION_NOT_FOUND`. Taking a seat at
-the table removes it too. Each dismissal makes the next invitation to that table wait longer: 5, 15, 30, 60 and then
-120 minutes after the 1st to 5th dismissal. After a 6th (the first invitation plus five re-invites), nobody can invite
+the table removes it too. Each dismissal makes the next invitation to that table wait longer: 10 seconds, 30 seconds, then
+1, 3 and 5 minutes after the 1st to 5th dismissal. After a 6th (the first invitation plus five re-invites), nobody can invite
 that player to that table again.
 
 ### `POST /room/:id/invite {handle}` (auth)
@@ -363,7 +363,10 @@ A player the host removed doesn't need to be the host's friend to come back:
 
 - `GET /room/:id/rejoin`: `200 {removed, requested, declined}`, where you stand.
 - `POST /room/:id/rejoin`: asks the host, once, before the game starts. `200 {removed: true, requested: true,
-  declined: false}`; the host hears `rejoin_requested {room_id, player: {handle, name}}`. `409 NOT_REMOVED`,
+  declined: false}`; the host hears `rejoin_requested {room_id, player: {handle, name}}`. If the host has since invited
+  you back (which lifts the removal), asking takes that invitation instead: you are at the table again, not seated,
+  `200 {removed: false, requested: false, declined: false, joined: true}`, and everyone hears `room_updated`. `409 NOT_REMOVED`
+  (not removed, and no invitation),
   `409 ALREADY_ASKED`, `403 REJOIN_DECLINED`, `409 GAME_ALREADY_STARTED`, `404 ROOM_NOT_FOUND`.
 
 To list your rooms, see [`GET /user/rooms`](#get-userrooms-auth).

@@ -332,7 +332,9 @@ async function rejoin_status(req, res) {
 /**
  * POST /room/:id/rejoin: a player the host sent away asks to come back, once, before the game starts. Needs no
  * friendship with the host, who hears `rejoin_requested {room_id, player}` and can let them back in or decline.
- * 200 {removed: true, requested: true, declined: false}.
+ * 200 {removed: true, requested: true, declined: false}. A removed player the host has since invited back needs no
+ * answer: asking takes the invitation and puts them at the table, 200 {removed: false, requested: false,
+ * declined: false, joined: true}.
  */
 async function request_rejoin(req, res) {
     const user = await db_user.get_user({handle: req.handle});
@@ -340,7 +342,7 @@ async function request_rejoin(req, res) {
         throw new RoomError('NOT_SIGNED_IN', 'Sign in to ask to rejoin.');
     }
     const {id} = req.params;
-    const room = await transaction(async function (client) {
+    const {room, joined} = await transaction(async function (client) {
         const room = await db_room.get({id, client, lock: true});
         if (room === undefined) {
             throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
@@ -350,7 +352,12 @@ async function request_rejoin(req, res) {
         }
         const ban = await db_room.ban_of({id, user_id: user.id, client});
         if (ban === undefined) {
-            throw new RoomError('NOT_REMOVED', "You weren't removed from this table, so you can sit down without asking.");
+            // The host invited them back, which lifted the removal: asking takes that invitation, as opening the table would.
+            if (!await db_friends.dismiss_invitation({user_id: user.id, room_id: id, client})) {
+                throw new RoomError('NOT_REMOVED', "You weren't removed from this table, so you can sit down without asking.");
+            }
+            await db_room.add_member({id, user_id: user.id, client});
+            return {room, joined: true};
         }
         if (ban.declined) {
             throw new RoomError('REJOIN_DECLINED', `${room.administrator_name} said no to your request to rejoin this table.`);
@@ -358,8 +365,15 @@ async function request_rejoin(req, res) {
         if (!await db_room.request_rejoin({id, user_id: user.id, client})) {
             throw new RoomError('ALREADY_ASKED', `You've already asked. ${room.administrator_name} hasn't answered yet.`);
         }
-        return room;
+        return {room, joined: false};
     });
+    if (joined) {
+        res.send({removed: false, requested: false, declined: false, joined: true});
+        // Their invitation is answered, and the table lists them under Not seated yet.
+        socket_server.send_to({handle: user.handle, event: 'friends_updated', data: {}});
+        await broadcast_room({id});
+        return;
+    }
     res.send({removed: true, requested: true, declined: false});
     socket_server.send_to({handle: room.administrator, event: 'rejoin_requested', data: {room_id: id, player: {handle: user.handle, name: user.name}}});
 }

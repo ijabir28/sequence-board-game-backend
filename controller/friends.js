@@ -202,7 +202,7 @@ async function invitations(req, res) {
 
 /**
  * DELETE /friends/invitations/:room_id: the player won't come. 204. Each dismissal makes the next invitation to that
- * table wait longer, up to a limit (REINVITE_COOLDOWN_MINUTES in entity/friends.js).
+ * table wait longer, up to a limit (REINVITE_COOLDOWN_SECONDS in entity/friends.js).
  */
 async function dismiss_invitation(req, res) {
     const me = await signed_in(req);
