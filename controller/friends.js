@@ -7,6 +7,7 @@ const {FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_hand
 const online = require('./online');
 const presence = require('./presence');
 const socket_server = require('../socket');
+const {broadcast_room} = require('./room');
 
 // Friends: finding players, asking them to be friends, answering, unfriending, and inviting a friend to a table.
 // Errors are JSON: {error: CODE, message}. Whoever a change concerns hears `friends_updated` on their own sockets
@@ -26,6 +27,7 @@ const STATUS_BY_ERROR = {
     GAME_ALREADY_STARTED: 409,
     ALREADY_SEATED: 409,
     TABLE_FULL: 409,
+    REMOVED_BY_HOST: 403,
 };
 
 const UNIQUE_VIOLATION = '23505';
@@ -204,6 +206,8 @@ async function dismiss_invitation(req, res) {
     }
     res.status(204).send();
     changed(me.handle);
+    // The table lists who is invited.
+    await broadcast_room({id: req.params.room_id});
 }
 
 /**
@@ -234,6 +238,13 @@ async function invite(req, res) {
         if (db_room.is_full(room)) {
             throw new FriendError('TABLE_FULL', 'Every seat at this table is taken.');
         }
+        // A player the host sent away comes back only when the host asks them.
+        if (await db_room.is_banned({id: room.id, user_id: friend.id, client})) {
+            if (room.administrator !== me.handle) {
+                throw new FriendError('REMOVED_BY_HOST', `${room.administrator_name}, who opened this table, asked ${friend.name} to leave it.`);
+            }
+            await db_room.lift_ban({id: room.id, user_id: friend.id, client});
+        }
         await db_friends.invite({room_id: room.id, inviter_id: me.id, invitee_id: friend.id, client});
         return room;
     });
@@ -244,6 +255,7 @@ async function invite(req, res) {
         data: {room_id: room.id, room_name: room.name, from: public_player(me)},
     });
     changed(friend.handle);
+    await broadcast_room({id: room.id});
 }
 
 module.exports = {

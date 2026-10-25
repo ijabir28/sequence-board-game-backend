@@ -232,7 +232,8 @@ the table removes it too.
 Asks a friend to the table: `200 {handle}`. Only someone seated there or its host, before the game starts, while a seat
 is free. Inviting again renews the invitation. The friend hears `table_invitation`. `403 NOT_AT_TABLE`, `403
 NOT_FRIENDS`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED` (quick match tables included), `409 ALREADY_SEATED`,
-`409 TABLE_FULL`.
+`409 TABLE_FULL`, `403 REMOVED_BY_HOST` (the host sent that friend away; only the host can invite them back, which
+lets them sit down again).
 
 ## Room
 
@@ -283,6 +284,8 @@ Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead
     { "handle": "TEAM_1", "players": [ {"handle": "jabir", "name": "Jabir ibne kamal"}, null ] },
     { "handle": "TEAM_2", "players": [ null, null ] }
   ],
+  "standing": [ {"handle": "sakib", "name": "Sakib"} ],          // at the table without a seat (stood up)
+  "invited": [ {"handle": "nadia", "name": "Nadia", "invited_by": "jabir"} ],  // invited, not yet sat down
   "game_started": false,
   "round": null,                             // the current round, from 1; null before the game starts
   "rounds_over": false                       // the host has ended the rounds
@@ -297,6 +300,7 @@ Body `{team_handle}`. Takes the first empty seat in that team. Always HTTP `200`
 - `{"message": "ALREADY_SEATED"}` when you already have a seat at this table.
 - `{"message": "NOT_SIGNED_IN"}` without a session.
 - `{"message": "GAME_ALREADY_STARTED"}` once the table's game has started.
+- `{"message": "REMOVED_BY_HOST"}` when the host sent you away from this table (until they invite you back).
 - `{"message": "ROOM_NOT_FOUND"}` or `{"message": "TEAM_NOT_FOUND"}`.
 
 Joins to the same room are serialised, so a contested last seat goes to exactly one player.
@@ -309,7 +313,23 @@ Stand up from your seat before the game starts, to take another seat or let the 
 ### `POST /room/:id/shuffle` (auth, host)
 Deals the seated players out to the seats at random before the game starts, keeping teams as even as possible
 (seat 1 of every team first, then seat 2, …). `200` with the Room, and `room_updated` is broadcast. `401`, `403
-NOT_HOST`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED`. To list your rooms, see [`GET /user/rooms`](#get-userrooms-auth).
+NOT_HOST`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED`.
+
+### Host controls (auth, host)
+Before the game starts, the host runs the seating. Each answers `200` with the Room and broadcasts `room_updated`.
+Shared errors: `401 NOT_SIGNED_IN`, `403 NOT_HOST` (quick match tables have no host), `404 ROOM_NOT_FOUND`,
+`404 PLAYER_NOT_FOUND`, `409 GAME_ALREADY_STARTED`.
+
+- `POST /room/:id/seat {handle, team_handle, seat}`: puts a player at the table (seated, standing, invited, or the
+  host) in that seat, `seat` counting from 0 within the team. Whoever sat there trades places with them, or stands up
+  if they had no seat. Seating an invited player answers their invitation. `400 SEAT_NOT_FOUND`, `409 NOT_AT_TABLE`.
+- `POST /room/:id/unseat {handle}`: stands a player up. They stay in `standing`. `409 NOT_SEATED`.
+- `POST /room/:id/kick {handle}`: sends a player away: their seat, place at the table and invitation go, and joining
+  answers `REMOVED_BY_HOST` until the host invites them back. They hear `removed_from_table`. `400 CANNOT_KICK_SELF`.
+- `DELETE /room/:id/invitations/:handle`: takes back a player's invitation. They hear `friends_updated`.
+  `409 NOT_INVITED`.
+
+To list your rooms, see [`GET /user/rooms`](#get-userrooms-auth).
 
 ## Table game
 
@@ -521,6 +541,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
 | `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
 | `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
+| `removed_from_table` | `{room_id}` | Only to the sockets of a player the host sent away from that table |
 | `friends_updated` | `{}` | Only to the sockets of a player whose friends, requests or invitations changed: re-fetch `GET /friends/list` |
 | `table_invitation` | `{room_id, room_name, from: {handle, name, image}}` | Only to the invited friend's sockets |
 | `table_chat_history` | `{room_id, messages: [Message]}` | Only to the socket that sent `open_table_chat`: the table's last 50 messages, oldest first |

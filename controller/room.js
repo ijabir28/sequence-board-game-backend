@@ -80,6 +80,9 @@ async function join(req, res) {
             if (await db_game.get({room_id: id, client}) !== undefined) {
                 throw 'GAME_ALREADY_STARTED';
             }
+            if (await db_room.is_banned({id, user_id: user.id, client})) {
+                throw 'REMOVED_BY_HOST';
+            }
             await db_room.join({id, team_handle: req.body.team_handle, user, client});
             // Sitting down answers a friend's invitation to this table.
             await db_friends.dismiss_invitation({user_id: user.id, room_id: id, client});
@@ -153,6 +156,132 @@ async function shuffle(req, res) {
     await broadcast_room({id});
 }
 
+/**
+ * Runs `action(client, room, player)` for the host, on another player at their table, before its game starts: the room
+ * is locked, and `player` is the user `req.body.handle` names (or `req.params.handle`). `what` finishes "Only the host
+ * can …" in the refusal. Returns what the action returns.
+ */
+async function as_host(req, what, action) {
+    const handle = req.handle;
+    if (handle === undefined) {
+        throw new RoomError('NOT_SIGNED_IN', 'Sign in to run this table.');
+    }
+    const {id} = req.params;
+    const player_handle = (req.body && req.body.handle) || req.params.handle;
+    return transaction(async function (client) {
+        const room = await db_room.get({id, client, lock: true});
+        if (room === undefined) {
+            throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
+        }
+        if (room.administrator !== handle || room.matchmaking) {
+            throw new RoomError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, can ${what}.`);
+        }
+        if (await db_game.get({room_id: id, client}) !== undefined) {
+            throw new RoomError('GAME_ALREADY_STARTED', 'The game has started, so the seats are fixed.');
+        }
+        const player = typeof player_handle === 'string' ? await db_user.get_user({handle: player_handle}) : undefined;
+        if (player === undefined) {
+            throw new RoomError('PLAYER_NOT_FOUND', 'There is no player with that name.');
+        }
+        return action(client, room, player);
+    });
+}
+
+/** The user's seat at the room as {team, seat}, or null. */
+function seat_of(room, handle) {
+    for (let team = 0; team < room.teams.length; team++) {
+        const seat = room.teams[team].players.findIndex(function (player) {
+            return player !== null && player.handle === handle;
+        });
+        if (seat !== -1) return {team, seat};
+    }
+    return null;
+}
+
+/**
+ * POST /room/:id/seat {handle, team_handle, seat}: the host puts a player at the table (seated, standing, invited, or
+ * the host) in that seat (0-based within the team). A player sitting there trades places with them, or stands up if
+ * the player had no seat. 200 with the room.
+ */
+async function seat(req, res) {
+    const {id} = req.params;
+    await as_host(req, 'choose where players sit', async function (client, room, player) {
+        const team = Number(String(req.body.team_handle).replace(/^TEAM_/, '')) - 1;
+        const index = Number(req.body.seat);
+        if (!(team >= 0 && team < room.team_count && Number.isInteger(team)) || !(Number.isInteger(index) && index >= 0 && index < room.players_per_team)) {
+            throw new RoomError('SEAT_NOT_FOUND', 'There is no such seat at this table.');
+        }
+        const at_table = player.handle === room.administrator
+            || await db_room.is_member({id, user_id: player.id, client})
+            || (await db_room.people({id, client})).invited.some(function (invited) {
+                return invited.handle === player.handle;
+            });
+        if (!at_table) {
+            throw new RoomError('NOT_AT_TABLE', `${player.name} isn't at this table. Invite them first.`);
+        }
+        const from = seat_of(room, player.handle);
+        if (from !== null && from.team === team && from.seat === index) return;
+        const occupant = room.teams[team].players[index];
+        if (occupant !== null) {
+            await db_room.free_seat({id, user_id: room.seated_user_ids[occupant.handle], client});
+        }
+        await db_room.take_seat({id, team, seat: index, user_id: player.id, client});
+        if (occupant !== null && from !== null) {
+            await db_room.take_seat({id, team: from.team, seat: from.seat, user_id: room.seated_user_ids[occupant.handle], client});
+        }
+        // Sitting down answers their invitation, as when they take a seat themself.
+        await db_friends.dismiss_invitation({user_id: player.id, room_id: id, client});
+    });
+    res.send(await room_payload({id}));
+    await broadcast_room({id});
+}
+
+/** POST /room/:id/unseat {handle}: the host stands a player up. They stay at the table, so they can be seated again. */
+async function unseat(req, res) {
+    const {id} = req.params;
+    await as_host(req, 'stand players up', async function (client, room, player) {
+        if (!await db_room.free_seat({id, user_id: player.id, client})) {
+            throw new RoomError('NOT_SEATED', `${player.name} doesn't have a seat at this table.`);
+        }
+    });
+    res.send(await room_payload({id}));
+    await broadcast_room({id});
+}
+
+/**
+ * POST /room/:id/kick {handle}: the host sends a player away from the table. They lose their seat and any invitation,
+ * and can't sit down again unless the host invites them back. 200 with the room.
+ */
+async function kick(req, res) {
+    const {id} = req.params;
+    const player = await as_host(req, 'send players away', async function (client, room, player) {
+        if (player.handle === room.administrator) {
+            throw new RoomError('CANNOT_KICK_SELF', "You opened this table, so you can't send yourself away.");
+        }
+        await db_room.remove_member({id, user_id: player.id, client});
+        return player;
+    });
+    res.send(await room_payload({id}));
+    socket_server.send_to({handle: player.handle, event: 'removed_from_table', data: {room_id: id}});
+    socket_server.send_to({handle: player.handle, event: 'friends_updated', data: {}});
+    await broadcast_room({id});
+}
+
+/** DELETE /room/:id/invitations/:handle: the host takes back a player's invitation to the table. 200 with the room. */
+async function uninvite(req, res) {
+    const {id} = req.params;
+    const player = await as_host(req, 'take back invitations', async function (client, room, player) {
+        if (!await db_friends.dismiss_invitation({user_id: player.id, room_id: id, client})) {
+            throw new RoomError('NOT_INVITED', `${player.name} has no invitation to this table.`);
+        }
+        return player;
+    });
+    res.send(await room_payload({id}));
+    // Their list of invitations drops this table.
+    socket_server.send_to({handle: player.handle, event: 'friends_updated', data: {}});
+    await broadcast_room({id});
+}
+
 async function room_payload({id}) {
     const room = await db_room.get({id});
     if (room === undefined) {
@@ -173,6 +302,8 @@ async function room_payload({id}) {
                 }),
             });
         }),
+        // Who is around the table without a seat: stood up, or invited and not yet sat down.
+        ...await db_room.people({id}),
         created_at: room.created_at,
         game_started: game !== undefined,
         // The round being played (or just won), and whether the host has ended the rounds.
@@ -195,6 +326,9 @@ const STATUS_BY_ERROR = {
     ROOM_NOT_FOUND: 404,
     GAME_ALREADY_STARTED: 409,
     NOT_SEATED: 409,
+    PLAYER_NOT_FOUND: 404,
+    NOT_AT_TABLE: 409,
+    NOT_INVITED: 409,
 };
 
 // Express 4 doesn't catch rejected promises; answer instead of leaving the request hanging.
@@ -218,6 +352,10 @@ module.exports = {
     update_settings: handler(update_settings),
     leave: handler(leave),
     shuffle: handler(shuffle),
+    seat: handler(seat),
+    unseat: handler(unseat),
+    kick: handler(kick),
+    uninvite: handler(uninvite),
     room_payload,
     broadcast_room,
 };
