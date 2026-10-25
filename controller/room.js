@@ -7,6 +7,7 @@ const {transaction} = require('../database/pool');
 const {is_supported_table} = require('../entity/sequence_game');
 const {RoomError, normalize_name, generate_slug, parse_settings, shuffle_seats} = require('../entity/room');
 const socket_server = require('../socket');
+const table_chat = require('./table_chat');
 
 /**
  * POST /room/create {number_of_team, number_of_player_in_each_team, name?, history?, highlights?, auto_draw_dead?}:
@@ -282,6 +283,56 @@ async function uninvite(req, res) {
     await broadcast_room({id});
 }
 
+// How long a table whose game hasn't started may sit untouched before it is deleted, and how often to look.
+const OPEN_TABLE_IDLE_HOURS = Number(process.env.OPEN_TABLE_IDLE_HOURS) > 0 ? Number(process.env.OPEN_TABLE_IDLE_HOURS) : 24;
+const OPEN_TABLE_SWEEP_MS = 60 * 60 * 1000;
+
+/**
+ * Deletes the tables whose game never started and that nobody touched for `idle_hours`, so abandoned tables don't
+ * pile up in "Your tables". Pages open on one hear `room_updated` and find it gone; invited players' lists drop it.
+ * Returns the deleted codes.
+ */
+async function delete_idle_open_tables({now = Date.now(), idle_hours = OPEN_TABLE_IDLE_HOURS} = {}) {
+    const before = new Date(now - idle_hours * 60 * 60 * 1000);
+    const {ids, invitees} = await transaction(function (client) {
+        return db_room.delete_idle_open({before, client});
+    });
+    ids.forEach(function (id) {
+        table_chat.forget(id);
+        socket_server.broadcast({event: 'room_updated', data: {id, deleted: true}});
+    });
+    invitees.forEach(function (handle) {
+        socket_server.send_to({handle, event: 'friends_updated', data: {}});
+    });
+    if (ids.length > 0) console.log(`Deleted ${ids.length} idle table${ids.length === 1 ? '' : 's'} whose game never started.`);
+    return ids;
+}
+
+/**
+ * Sweeps for idle open tables now and every `interval_ms` after, one sweep at a time. Started by bin/www (not by the
+ * app, so tests stay in control). Returns a function that stops it.
+ */
+function start_open_table_cleanup({interval_ms = OPEN_TABLE_SWEEP_MS} = {}) {
+    let running = false;
+    const sweep = function () {
+        if (running) return;
+        running = true;
+        delete_idle_open_tables()
+            .catch(function (e) {
+                console.error('Idle table sweep failed:', e.message);
+            })
+            .finally(function () {
+                running = false;
+            });
+    };
+    sweep();
+    const timer = setInterval(sweep, interval_ms);
+    timer.unref();
+    return function () {
+        clearInterval(timer);
+    };
+}
+
 async function room_payload({id}) {
     const room = await db_room.get({id});
     if (room === undefined) {
@@ -358,4 +409,7 @@ module.exports = {
     uninvite: handler(uninvite),
     room_payload,
     broadcast_room,
+    OPEN_TABLE_IDLE_HOURS,
+    delete_idle_open_tables,
+    start_open_table_cleanup,
 };

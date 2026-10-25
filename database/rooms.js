@@ -322,7 +322,43 @@ async function forfeit_seat({id, user_id, client}) {
     await client.query('UPDATE room_seats SET forfeited_at = now() WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
 }
 
+// Deletes the tables whose game never started and where nothing happened since `before` (a Date): opened earlier, with
+// nobody sitting down or being invited there since. Tables someone is changing right now (their row is locked) wait for
+// the next sweep. Returns {ids, invitees}: the deleted codes, and the handles of players who had an invitation to one of them.
+async function delete_idle_open({before, client}) {
+    const {rows} = await client.query(
+        `SELECT rooms.id FROM rooms
+         WHERE NOT EXISTS (SELECT 1 FROM games WHERE games.room_id = rooms.id)
+           AND GREATEST(
+                   rooms.created_at,
+                   (SELECT max(joined_at) FROM room_seats WHERE room_seats.room_id = rooms.id),
+                   (SELECT max(joined_at) FROM room_members WHERE room_members.room_id = rooms.id),
+                   (SELECT max(created_at) FROM table_invitations WHERE table_invitations.room_id = rooms.id)
+               ) < $1
+         FOR UPDATE OF rooms SKIP LOCKED`,
+        [before]
+    );
+    const ids = rows.map(function (row) {
+        return row.id;
+    });
+    if (ids.length === 0) {
+        return {ids, invitees: []};
+    }
+    const invitees = await client.query(
+        `SELECT DISTINCT users.handle FROM table_invitations JOIN users ON users.id = table_invitations.invitee_id
+         WHERE table_invitations.room_id = ANY($1)`,
+        [ids]
+    );
+    // Members, bans and invitations go with the room (ON DELETE CASCADE); seats don't, so they go first.
+    await client.query('DELETE FROM room_seats WHERE room_id = ANY($1)', [ids]);
+    await client.query('DELETE FROM rooms WHERE id = ANY($1)', [ids]);
+    return {ids, invitees: invitees.rows.map(function (row) {
+        return row.handle;
+    })};
+}
+
 module.exports = {
+    delete_idle_open,
     forfeit_seat,
     create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
     current_match_for_user,

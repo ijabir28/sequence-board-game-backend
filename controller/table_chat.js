@@ -170,6 +170,11 @@ function bind({connection, io, account, room_exists}) {
     });
 }
 
+/** Forgets a table's chat (the table was deleted). */
+function forget(room_id) {
+    histories.delete(String(room_id));
+}
+
 /** Forgets every table's chat and every rate limit (for tests). */
 function reset() {
     histories.clear();
@@ -190,5 +195,6 @@ module.exports = {
     post_message,
     react,
     bind,
+    forget,
     reset,
 };
