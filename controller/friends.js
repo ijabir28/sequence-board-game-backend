@@ -3,7 +3,7 @@ const db_friends = require('../database/friends');
 const db_room = require('../database/rooms');
 const db_game = require('../database/games');
 const {transaction} = require('../database/pool');
-const {FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_handle} = require('../entity/friends');
+const {FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_handle, reinvite_wait, wait_text} = require('../entity/friends');
 const online = require('./online');
 const presence = require('./presence');
 const socket_server = require('../socket');
@@ -28,6 +28,8 @@ const STATUS_BY_ERROR = {
     ALREADY_SEATED: 409,
     TABLE_FULL: 409,
     REMOVED_BY_HOST: 403,
+    INVITE_COOLDOWN: 429,
+    INVITE_LIMIT: 409,
 };
 
 const UNIQUE_VIOLATION = '23505';
@@ -198,12 +200,19 @@ async function invitations(req, res) {
     res.send({invitations: await db_friends.list_invitations({user_id: me.id})});
 }
 
-/** DELETE /friends/invitations/:room_id: the player won't come. 204. */
+/**
+ * DELETE /friends/invitations/:room_id: the player won't come. 204. Each dismissal makes the next invitation to that
+ * table wait longer, up to a limit (REINVITE_COOLDOWN_MINUTES in entity/friends.js).
+ */
 async function dismiss_invitation(req, res) {
     const me = await signed_in(req);
-    if (!await db_friends.dismiss_invitation({user_id: me.id, room_id: req.params.room_id})) {
-        throw new FriendError('INVITATION_NOT_FOUND', 'That invitation has already gone.');
-    }
+    const room_id = req.params.room_id;
+    await transaction(async function (client) {
+        if (!await db_friends.dismiss_invitation({user_id: me.id, room_id, client})) {
+            throw new FriendError('INVITATION_NOT_FOUND', 'That invitation has already gone.');
+        }
+        await db_friends.record_dismissal({user_id: me.id, room_id, client});
+    });
     res.status(204).send();
     changed(me.handle);
     // The table lists who is invited.
@@ -238,6 +247,14 @@ async function invite(req, res) {
         if (db_room.is_full(room)) {
             throw new FriendError('TABLE_FULL', 'Every seat at this table is taken.');
         }
+        // Someone who keeps saying no is asked less and less often, and at last not at all.
+        const wait = reinvite_wait(await db_friends.dismissals({user_id: friend.id, room_id: room.id, client}));
+        if (wait.limit_reached) {
+            throw new FriendError('INVITE_LIMIT', `${friend.name} has turned down every invitation to this table, so it can't be sent again.`);
+        }
+        if (!wait.allowed) {
+            throw new FriendError('INVITE_COOLDOWN', `${friend.name} turned down an invitation to this table. You can invite them again in ${wait_text(wait.retry_at)}.`);
+        }
         // A player the host sent away comes back only when the host asks them.
         if (await db_room.is_banned({id: room.id, user_id: friend.id, client})) {
             if (room.administrator !== me.handle) {
@@ -258,7 +275,33 @@ async function invite(req, res) {
     await broadcast_room({id: room.id});
 }
 
+/**
+ * GET /room/:id/invite-status: for anyone who may invite to the table (seated there, or its host), who can't be invited
+ * right now and why. 200 {dismissed: [{handle, dismissals, retry_at, limit_reached}], removed: [handle]}: `retry_at` is
+ * when they may be invited again (null when they may now, or never again); `removed` lists players the host sent away,
+ * whom only the host can invite back (so it is empty for everyone else).
+ */
+async function invite_status(req, res) {
+    const me = await signed_in(req);
+    const {id} = req.params;
+    const room = await db_room.get({id});
+    if (room === undefined) {
+        throw new FriendError('ROOM_NOT_FOUND', 'There is no table with that code.');
+    }
+    const host = room.administrator === me.handle;
+    if (!host && !db_room.is_seated(room, me.handle)) {
+        throw new FriendError('NOT_AT_TABLE', 'Take a seat at this table before inviting friends to it.');
+    }
+    const now = Date.now();
+    const dismissed = (await db_friends.room_dismissals({room_id: id})).map(function ({handle, dismissals, last_dismissed_at}) {
+        const wait = reinvite_wait({dismissals, last_dismissed_at, now});
+        return {handle, dismissals, retry_at: wait.retry_at ? wait.retry_at.toISOString() : null, limit_reached: wait.limit_reached === true};
+    });
+    res.send({dismissed, removed: host ? await db_room.banned_handles({id}) : []});
+}
+
 module.exports = {
+    invite_status: handler(invite_status),
     overview: handler(overview),
     search: handler(search),
     send_request: handler(send_request),

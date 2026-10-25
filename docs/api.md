@@ -226,14 +226,23 @@ Ends the friendship (and drops invitations between the two): `204`, or `403 NOT_
 
 ### `GET /friends/invitations` (auth) · `DELETE /friends/invitations/:room_id` (auth)
 The `invitations` of `GET /friends/list`; dismissing one is `204`, or `404 INVITATION_NOT_FOUND`. Taking a seat at
-the table removes it too.
+the table removes it too. Each dismissal makes the next invitation to that table wait longer: 5, 15, 30, 60 and then
+120 minutes after the 1st to 5th dismissal. After a 6th (the first invitation plus five re-invites), nobody can invite
+that player to that table again.
 
 ### `POST /room/:id/invite {handle}` (auth)
 Asks a friend to the table: `200 {handle}`. Only someone seated there or its host, before the game starts, while a seat
 is free. Inviting again renews the invitation. The friend hears `table_invitation`. `403 NOT_AT_TABLE`, `403
 NOT_FRIENDS`, `404 ROOM_NOT_FOUND`, `409 GAME_ALREADY_STARTED` (quick match tables included), `409 ALREADY_SEATED`,
 `409 TABLE_FULL`, `403 REMOVED_BY_HOST` (the host sent that friend away; only the host can invite them back, which
-lets them sit down again).
+lets them sit down again), `429 INVITE_COOLDOWN` (they dismissed an invitation to this table recently; the message says
+how long to wait), `409 INVITE_LIMIT` (they dismissed too many).
+
+### `GET /room/:id/invite-status` (auth)
+For someone who may invite to the table (seated there, or its host): `200 {dismissed: [{handle, dismissals, retry_at,
+limit_reached}], removed: [handle]}`. `retry_at` (ISO time) is when that player can be invited again, `null` when they
+can be now or never again (`limit_reached`). `removed` lists players the host sent away, which only the host can invite
+back; it is empty for everyone else. `403 NOT_AT_TABLE`, `404 ROOM_NOT_FOUND`.
 
 ## Room
 

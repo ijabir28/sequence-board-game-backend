@@ -8,6 +8,7 @@ room_router.get('/:id', room);
 room_router.post('/:id/join', join);
 room_router.post('/:id/leave', leave);
 room_router.post('/:id/invite', friends.invite);
+room_router.get('/:id/invite-status', friends.invite_status);
 room_router.post('/:id/shuffle', shuffle);
 room_router.post('/:id/seat', seat);
 room_router.post('/:id/unseat', unseat);
