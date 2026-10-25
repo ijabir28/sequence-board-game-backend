@@ -148,6 +148,9 @@ describe_with_database('friends', function () {
             expect((await overview('dan')).invitations).toEqual([]);
             expect((await agents.dan.delete(`/friends/invitations/${other}`)).status).toBe(404);
 
+            // Asking again right away has to wait; once the wait is over, it goes.
+            expect((await agents.cat.post(`/room/${other}/invite`).send({handle: 'dan'})).body.error).toBe('INVITE_COOLDOWN');
+            await database.pool.query("UPDATE table_invitation_dismissals SET last_dismissed_at = now() - interval '5 minutes' WHERE room_id = $1", [other]);
             await agents.cat.post(`/room/${other}/invite`).send({handle: 'dan'}).expect(200);
             await agents.cat.post(`/room/${other}/join`).send({team_handle: 'TEAM_1'}).expect(200);
             await agents.ann.post(`/room/${id}/join`).send({team_handle: 'TEAM_1'}).expect(200);
