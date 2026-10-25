@@ -171,6 +171,45 @@ describe_with_database('host controls', function () {
         expect(await join('ben', id, 'TEAM_2')).toBe('success');
     });
 
+    test('a removed player who is not the host\'s friend asks to rejoin, and the host lets them back in', async function () {
+        await sign_up('dan');
+        const id = await open_room();
+        expect(await join('dan', id, 'TEAM_1')).toBe('success');
+        expect((await agents.dan.get(`/room/${id}/rejoin`).expect(200)).body).toEqual({removed: false, requested: false, declined: false});
+        expect((await agents.dan.post(`/room/${id}/rejoin`)).body.error).toBe('NOT_REMOVED');
+
+        await agents.host.post(`/room/${id}/kick`).send({handle: 'dan'}).expect(200);
+        // Not friends, so the host can't invite him back.
+        expect((await agents.host.post(`/room/${id}/invite`).send({handle: 'dan'})).body.error).toBe('NOT_FRIENDS');
+        expect((await agents.dan.post(`/room/${id}/rejoin`).expect(200)).body).toEqual({removed: true, requested: true, declined: false});
+        expect((await agents.dan.post(`/room/${id}/rejoin`)).body.error).toBe('ALREADY_ASKED');
+        const list = (await agents.host.get(`/room/${id}/removed`).expect(200)).body.removed;
+        expect(list).toEqual([expect.objectContaining({handle: 'dan', name: 'P dan', rejoin_declined: false})]);
+        expect(list[0].rejoin_requested_at).not.toBeNull();
+        expect((await agents.ann.get(`/room/${id}/removed`)).body.error).toBe('NOT_HOST');
+        expect((await agents.ann.post(`/room/${id}/readmit`).send({handle: 'dan'})).body.error).toBe('NOT_HOST');
+
+        const room = (await agents.host.post(`/room/${id}/readmit`).send({handle: 'dan'}).expect(200)).body;
+        expect(room.standing.map((p) => p.handle)).toEqual(['dan']);
+        expect((await agents.host.post(`/room/${id}/readmit`).send({handle: 'dan'})).body.error).toBe('NOT_REMOVED');
+        expect((await agents.host.get(`/room/${id}/removed`)).body.removed).toEqual([]);
+        expect(await join('dan', id, 'TEAM_2')).toBe('success');
+    });
+
+    test('a declined request to rejoin can\'t be sent again, but the host can still let them in', async function () {
+        const id = await open_room();
+        expect(await join('ann', id, 'TEAM_1')).toBe('success');
+        await agents.host.post(`/room/${id}/kick`).send({handle: 'ann'}).expect(200);
+        expect((await agents.host.delete(`/room/${id}/rejoin/ann`)).body.error).toBe('NO_REJOIN_REQUEST');
+        await agents.ann.post(`/room/${id}/rejoin`).expect(200);
+        await agents.host.delete(`/room/${id}/rejoin/ann`).expect(204);
+        expect((await agents.ann.get(`/room/${id}/rejoin`)).body).toEqual({removed: true, requested: true, declined: true});
+        expect((await agents.ann.post(`/room/${id}/rejoin`)).body.error).toBe('REJOIN_DECLINED');
+        expect(await join('ann', id, 'TEAM_1')).toBe('REMOVED_BY_HOST');
+        await agents.host.post(`/room/${id}/readmit`).send({handle: 'ann'}).expect(200);
+        expect(await join('ann', id, 'TEAM_1')).toBe('success');
+    });
+
     test('seats are fixed once the game starts', async function () {
         const id = await open_room(2, 1);
         expect(await join('ann', id, 'TEAM_1')).toBe('success');
