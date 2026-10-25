@@ -50,7 +50,7 @@ function send_error(res, e) {
 
 async function find_room(id, client) {
     const room = await db_room.get({id, client, lock: true});
-    if (room === undefined) throw new GameError('ROOM_NOT_FOUND', 'There is no room with that code.');
+    if (room === undefined) throw new GameError('ROOM_NOT_FOUND', 'There is no table with that code.');
     return room;
 }
 
@@ -58,9 +58,9 @@ async function find_room(id, client) {
 // two moves on the same table can't interleave.
 async function find_game(id, client) {
     const room = await db_room.get({id, client});
-    if (room === undefined) throw new GameError('ROOM_NOT_FOUND', 'There is no room with that code.');
+    if (room === undefined) throw new GameError('ROOM_NOT_FOUND', 'There is no table with that code.');
     const game = await db_game.get({room_id: id, client, lock: client !== undefined});
-    if (game === undefined) throw new GameError('GAME_NOT_FOUND', "This room's game hasn't started yet.");
+    if (game === undefined) throw new GameError('GAME_NOT_FOUND', "This table's game hasn't started yet.");
     return {room, game};
 }
 
@@ -310,10 +310,10 @@ async function start(req, res) {
     const {room, game, rounds} = await transaction(async function (client) {
         const room = await find_room(id, client);
         if (room.administrator !== handle) {
-            throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this room, can start its game.`);
+            throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, can start its game.`);
         }
         if (await db_game.get({room_id: id, client}) !== undefined) {
-            throw new GameError('GAME_ALREADY_STARTED', "This room's game has already started.");
+            throw new GameError('GAME_ALREADY_STARTED', "This table's game has already started.");
         }
         if (!db_room.is_full(room)) throw new GameError('TABLE_NOT_FULL', 'Every seat must be taken before the game can start.');
 
@@ -339,7 +339,7 @@ async function round_detail(req, res) {
     const {room} = await find_game(req.params.id);
     const number = Number(req.params.round);
     const round = Number.isInteger(number) && number > 0 ? await db_game.get_round({room_id: room.id, round: number}) : undefined;
-    if (round === undefined) throw new GameError('ROUND_NOT_FOUND', `This room has no round ${req.params.round}.`);
+    if (round === undefined) throw new GameError('ROUND_NOT_FOUND', `This table has no round ${req.params.round}.`);
     if (round.finished_at === null) throw new GameError('ROUND_IN_PROGRESS', 'This round is still being played.');
     const {team_count, players, board, sequences, log} = view_for(round.state, null);
     res.send({
@@ -368,11 +368,11 @@ function host_decision(decide) {
         const {room, game, rounds} = await transaction(async function (client) {
             const room = await find_room(id, client);
             if (room.administrator !== handle) {
-                throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this room, decides whether to play another round.`);
+                throw new GameError('NOT_HOST', `Only ${room.administrator_name}, who opened this table, decides whether to play another round.`);
             }
             const current = await db_game.get({room_id: id, client, lock: true});
-            if (current === undefined) throw new GameError('GAME_NOT_FOUND', "This room's game hasn't started yet.");
-            if (room.rounds_ended_at !== null) throw new GameError('ROUNDS_OVER', "This room's rounds are over.");
+            if (current === undefined) throw new GameError('GAME_NOT_FOUND', "This table's game hasn't started yet.");
+            if (room.rounds_ended_at !== null) throw new GameError('ROUNDS_OVER', "This table's rounds are over.");
             if (current.winner === null) throw new GameError('ROUND_IN_PROGRESS', 'This round is still being played.');
             const decided = await decide(room, current, client);
             return Object.assign({}, decided, {rounds: await rounds_of(decided.room, decided.game, client)});
@@ -410,7 +410,7 @@ const end_rounds = host_decision(async function (room, current, client) {
 /** GET /room/:id/turns: every move so far, oldest first. Public, like the game view, unless the room turned history off. */
 async function turns(req, res) {
     const {room} = await find_game(req.params.id);
-    if (!room.settings.history) throw new GameError('HISTORY_DISABLED', 'This room plays without move history.');
+    if (!room.settings.history) throw new GameError('HISTORY_DISABLED', 'This table plays without move history.');
     res.send(await db_game.list_turns({room_id: req.params.id}));
 }
 
