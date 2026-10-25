@@ -9,6 +9,7 @@ const {with_direct_pool} = require('../database/pool');
 const {migrate} = require('../database/migrate');
 const {start_turn_timer, start_bot_players, presence_changed} = require('../controller/room_game');
 const {start_matchmaking} = require('../controller/matchmaking');
+const {start_open_table_cleanup} = require('../controller/room');
 const presence = require('../controller/presence');
 const friend_status = require('../controller/friend_status');
 const debug = require('debug')('sequence-board-game:server');
@@ -40,6 +41,8 @@ with_direct_pool(function (pool) {
         // Bots move at their tables, and the Quick Match queue seats players (with bots after two minutes' wait).
         start_bot_players();
         start_matchmaking();
+        // Tables whose game never started are deleted after a day without anything happening at them.
+        start_open_table_cleanup();
         // A player leaving or coming back to their table pauses or resumes their turn, and their friends' lists say so.
         presence.on_change(function (room_id, handle) {
             friend_status.changed(handle);

@@ -263,6 +263,10 @@ Settings and their defaults:
 
 Room codes created before slugs are numeric strings (`"731791746123232"`) and still work.
 
+A table whose game never started is deleted once nothing has happened there for a day (`OPEN_TABLE_IDLE_HOURS`,
+default 24): opened earlier, with nobody sitting down or being invited since. The server sweeps hourly and at start-up;
+`room_updated {id, deleted: true}` is broadcast for each, and invited players hear `friends_updated`.
+
 ### `PATCH /room/:id/settings` (auth, host)
 Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead_cards?, exchanges_per_turn?}`; missing keys keep their value. The code never changes.
 `200` with the Room, and `room_updated` is broadcast. `401 NOT_SIGNED_IN`, `403 NOT_HOST`, `404 ROOM_NOT_FOUND`,
@@ -536,7 +540,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 
 | Event (server → client) | Payload | When |
 |---|---|---|
-| `room_updated` | Room (see above) | After every successful join or game start, sent to **every** connected socket |
+| `room_updated` | Room (see above), or `{id, deleted: true}` | After every successful join or game start, or when an idle table is deleted, sent to **every** connected socket |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
 | `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
