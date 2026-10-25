@@ -363,7 +363,10 @@ A player the host removed doesn't need to be the host's friend to come back:
 
 - `GET /room/:id/rejoin`: `200 {removed, requested, declined}`, where you stand.
 - `POST /room/:id/rejoin`: asks the host, once, before the game starts. `200 {removed: true, requested: true,
-  declined: false}`; the host hears `rejoin_requested {room_id, player: {handle, name}}`. `409 NOT_REMOVED`,
+  declined: false}`; the host hears `rejoin_requested {room_id, player: {handle, name}}`. If the host has since invited
+  you back (which lifts the removal), asking takes that invitation instead: you are at the table again, not seated,
+  `200 {removed: false, requested: false, declined: false, joined: true}`, and everyone hears `room_updated`. `409 NOT_REMOVED`
+  (not removed, and no invitation),
   `409 ALREADY_ASKED`, `403 REJOIN_DECLINED`, `409 GAME_ALREADY_STARTED`, `404 ROOM_NOT_FOUND`.
 
 To list your rooms, see [`GET /user/rooms`](#get-userrooms-auth).

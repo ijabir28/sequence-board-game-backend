@@ -181,6 +181,23 @@ describe_with_database('host controls', function () {
         expect(await join('ben', id, 'TEAM_2')).toBe('success');
     });
 
+    test('a removed player the host invited back joins by asking, without waiting for an answer', async function () {
+        const id = await open_room();
+        expect(await join('ben', id, 'TEAM_2')).toBe('success');
+        await agents.host.post(`/room/${id}/kick`).send({handle: 'ben'}).expect(200);
+        await agents.host.post(`/room/${id}/invite`).send({handle: 'ben'}).expect(200);
+        expect((await agents.ben.post(`/room/${id}/rejoin`).expect(200)).body).toEqual({removed: false, requested: false, declined: false, joined: true});
+        const room = (await agents.host.get(`/room/${id}`).expect(200)).body;
+        expect(room.standing.map((p) => p.handle)).toEqual(['ben']);
+        expect(room.invited).toEqual([]);
+        // Taking the invitation isn't turning it down, and the host had nothing to answer.
+        expect((await agents.host.get(`/room/${id}/invite-status`)).body).toEqual({dismissed: [], removed: []});
+        expect((await agents.host.get(`/room/${id}/removed`)).body.removed).toEqual([]);
+        // With the invitation taken, there is nothing left to ask for.
+        expect((await agents.ben.post(`/room/${id}/rejoin`)).body.error).toBe('NOT_REMOVED');
+        expect(await join('ben', id, 'TEAM_2')).toBe('success');
+    });
+
     test('a removed player who is not the host\'s friend asks to rejoin, and the host lets them back in', async function () {
         await sign_up('dan');
         const id = await open_room();
