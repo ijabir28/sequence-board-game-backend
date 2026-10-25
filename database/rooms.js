@@ -207,6 +207,49 @@ async function banned_handles({id, client = pool}) {
     });
 }
 
+// The players the host sent away, in that order: [{handle, name, removed_at, rejoin_requested_at, rejoin_declined}].
+// `rejoin_requested_at` is when they asked to come back (null if they haven't).
+async function removed_players({id, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT users.handle, users.name, room_bans.created_at AS removed_at, room_bans.rejoin_requested_at,
+                room_bans.rejoin_declined_at IS NOT NULL AS rejoin_declined
+         FROM room_bans JOIN users ON users.id = room_bans.user_id
+         WHERE room_bans.room_id = $1 ORDER BY room_bans.created_at, users.handle`,
+        [String(id)]
+    );
+    return rows;
+}
+
+// How the user stands with the host, if they were sent away: {requested, declined}, or undefined if they weren't.
+async function ban_of({id, user_id, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT rejoin_requested_at IS NOT NULL AS requested, rejoin_declined_at IS NOT NULL AS declined
+         FROM room_bans WHERE room_id = $1 AND user_id = $2`,
+        [String(id), user_id]
+    );
+    return rows[0];
+}
+
+// The user, sent away, asks to come back. Only once, and not after the host declined. Returns whether it was recorded.
+async function request_rejoin({id, user_id, client = pool}) {
+    const {rowCount} = await client.query(
+        `UPDATE room_bans SET rejoin_requested_at = now()
+         WHERE room_id = $1 AND user_id = $2 AND rejoin_requested_at IS NULL AND rejoin_declined_at IS NULL`,
+        [String(id), user_id]
+    );
+    return rowCount > 0;
+}
+
+// The host said no to the user's request to come back. Returns whether there was a request to decline.
+async function decline_rejoin({id, user_id, client = pool}) {
+    const {rowCount} = await client.query(
+        `UPDATE room_bans SET rejoin_declined_at = now()
+         WHERE room_id = $1 AND user_id = $2 AND rejoin_requested_at IS NOT NULL AND rejoin_declined_at IS NULL`,
+        [String(id), user_id]
+    );
+    return rowCount > 0;
+}
+
 // The host invited the user back: they may sit down again.
 async function lift_ban({id, user_id, client = pool}) {
     await client.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
@@ -375,4 +418,5 @@ module.exports = {
     create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
     current_match_for_user,
     add_member, is_member, take_seat, free_seat, remove_member, is_banned, banned_handles, lift_ban, people,
+    removed_players, ban_of, request_rejoin, decline_rejoin,
 };
