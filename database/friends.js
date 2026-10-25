@@ -200,6 +200,38 @@ async function dismiss_invitation({user_id, room_id, client = pool}) {
     return rowCount > 0;
 }
 
+/** The player dismissed their invitation to `room_id` (not by sitting down): one more toward the re-invite limit. */
+async function record_dismissal({user_id, room_id, client = pool}) {
+    await client.query(
+        `INSERT INTO table_invitation_dismissals (room_id, invitee_id) VALUES ($1, $2)
+         ON CONFLICT (room_id, invitee_id) DO UPDATE
+         SET dismissals = table_invitation_dismissals.dismissals + 1, last_dismissed_at = now()`,
+        [String(room_id), user_id]
+    );
+}
+
+/** {dismissals, last_dismissed_at} for the player at `room_id`; dismissals is 0 if they never dismissed one there. */
+async function dismissals({user_id, room_id, client = pool}) {
+    const {rows} = await client.query(
+        'SELECT dismissals, last_dismissed_at FROM table_invitation_dismissals WHERE room_id = $1 AND invitee_id = $2',
+        [String(room_id), user_id]
+    );
+    return rows[0] || {dismissals: 0, last_dismissed_at: null};
+}
+
+/** Everyone who dismissed an invitation to `room_id`: [{handle, dismissals, last_dismissed_at}]. */
+async function room_dismissals({room_id, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT users.handle, table_invitation_dismissals.dismissals, table_invitation_dismissals.last_dismissed_at
+         FROM table_invitation_dismissals JOIN users ON users.id = table_invitation_dismissals.invitee_id
+         WHERE table_invitation_dismissals.room_id = $1
+         ORDER BY users.handle`,
+        [String(room_id)]
+    );
+    return rows;
+}
+
 module.exports = {
+    record_dismissal, dismissals, room_dismissals,
     player, count_outgoing, relationship, request, accept, remove, list_friends, friend_handles, list_requests, search, invite, list_invitations, dismiss_invitation,
 };

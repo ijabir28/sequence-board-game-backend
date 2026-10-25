@@ -195,6 +195,18 @@ async function is_banned({id, user_id, client = pool}) {
     return rowCount > 0;
 }
 
+// The handles of players the host sent away from the table, in the order they were sent away.
+async function banned_handles({id, client = pool}) {
+    const {rows} = await client.query(
+        `SELECT users.handle FROM room_bans JOIN users ON users.id = room_bans.user_id
+         WHERE room_bans.room_id = $1 ORDER BY room_bans.created_at, users.handle`,
+        [String(id)]
+    );
+    return rows.map(function (row) {
+        return row.handle;
+    });
+}
+
 // The host invited the user back: they may sit down again.
 async function lift_ban({id, user_id, client = pool}) {
     await client.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
@@ -362,5 +374,5 @@ module.exports = {
     forfeit_seat,
     create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
     current_match_for_user,
-    add_member, is_member, take_seat, free_seat, remove_member, is_banned, lift_ban, people,
+    add_member, is_member, take_seat, free_seat, remove_member, is_banned, banned_handles, lift_ban, people,
 };

@@ -26,9 +26,46 @@ function parse_search(value) {
     return {query: query.slice(0, SEARCH_MAX_LENGTH)};
 }
 
+// After a player dismisses an invitation to a table, the next one to that table waits this many minutes: the first
+// entry after their first dismissal, the second after their second, and so on. Once they have dismissed one more
+// invitation than there are entries (the first plus every re-invite), nobody can invite them to that table again.
+const REINVITE_COOLDOWN_MINUTES = [5, 15, 30, 60, 120];
+const MAX_REINVITES = REINVITE_COOLDOWN_MINUTES.length;
+
+/**
+ * Whether a player who dismissed `dismissals` invitations to a table, the last at `last_dismissed_at`, may be invited
+ * there again at `now` (ms): {allowed: true}, {allowed: false, limit_reached: true}, or {allowed: false, retry_at: Date}.
+ * No dismissals means no wait.
+ */
+function reinvite_wait({dismissals = 0, last_dismissed_at = null, now = Date.now()} = {}) {
+    if (dismissals <= 0) {
+        return {allowed: true};
+    }
+    if (dismissals > MAX_REINVITES) {
+        return {allowed: false, limit_reached: true};
+    }
+    const retry_at = new Date(new Date(last_dismissed_at).getTime() + REINVITE_COOLDOWN_MINUTES[dismissals - 1] * 60 * 1000);
+    return retry_at.getTime() <= now ? {allowed: true} : {allowed: false, retry_at};
+}
+
+/** "3 minutes", "1 hour 20 minutes": how long until `retry_at`, rounded up to the minute. */
+function wait_text(retry_at, now = Date.now()) {
+    const minutes = Math.max(1, Math.ceil((new Date(retry_at).getTime() - now) / 60000));
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    const part = function (count, unit) {
+        return `${count} ${unit}${count === 1 ? '' : 's'}`;
+    };
+    if (hours === 0) return part(minutes, 'minute');
+    return rest === 0 ? part(hours, 'hour') : `${part(hours, 'hour')} ${part(rest, 'minute')}`;
+}
+
 /** The handle a request names (trimmed, lower case, without a leading @), or '' for none. */
 function parse_handle(value) {
     return normalize_handle(value).replace(/^@/, '');
 }
 
-module.exports = {FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_handle};
+module.exports = {
+    FriendError, MAX_PENDING_REQUESTS, SEARCH_LIMIT, parse_search, parse_handle,
+    REINVITE_COOLDOWN_MINUTES, MAX_REINVITES, reinvite_wait, wait_text,
+};
