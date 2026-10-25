@@ -341,9 +341,10 @@ Before the game starts, the host runs the seating. Each answers `200` with the R
 Shared errors: `401 NOT_SIGNED_IN`, `403 NOT_HOST` (quick match tables have no host), `404 ROOM_NOT_FOUND`,
 `404 PLAYER_NOT_FOUND`, `409 GAME_ALREADY_STARTED`.
 
-- `POST /room/:id/seat {handle, team_handle, seat}`: puts a player at the table (seated, standing, invited, or the
-  host) in that seat, `seat` counting from 0 within the team. Whoever sat there trades places with them, or stands up
-  if they had no seat. Seating an invited player answers their invitation. `400 SEAT_NOT_FOUND`, `409 NOT_AT_TABLE`.
+- `POST /room/:id/seat {handle, team_handle, seat}`: puts a player at the table (seated, or in `standing`: anyone who
+  came by invitation, code or link) or the host in that seat, `seat` counting from 0 within the team. Whoever sat there
+  trades places with them, or stands up if they had no seat. `400 SEAT_NOT_FOUND`, `409 NOT_AT_TABLE` (they never came
+  to the table, including an invited player who hasn't opened it yet).
 - `POST /room/:id/unseat {handle}`: stands a player up. They stay in `standing`. `409 NOT_SEATED`.
 - `POST /room/:id/kick {handle}`: sends a player away: their seat, place at the table and invitation go, and joining
   answers `REMOVED_BY_HOST` until the host invites them back or lets them back in. They hear `removed_from_table`.

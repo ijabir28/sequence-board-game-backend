@@ -236,8 +236,9 @@ function seat_of(room, handle) {
 }
 
 /**
- * POST /room/:id/seat {handle, team_handle, seat}: the host puts a player at the table (seated, standing, invited, or
- * the host) in that seat (0-based within the team). A player sitting there trades places with them, or stands up if
+ * POST /room/:id/seat {handle, team_handle, seat}: the host puts a player at the table (seated, or not seated yet: they
+ * came by invitation, code or link) or the host themself in that seat (0-based within the team). An invited player who
+ * hasn't come to the table yet can't be seated. A player sitting there trades places with them, or stands up if
  * the player had no seat. 200 with the room.
  */
 async function seat(req, res) {
@@ -248,13 +249,9 @@ async function seat(req, res) {
         if (!(team >= 0 && team < room.team_count && Number.isInteger(team)) || !(Number.isInteger(index) && index >= 0 && index < room.players_per_team)) {
             throw new RoomError('SEAT_NOT_FOUND', 'There is no such seat at this table.');
         }
-        const at_table = player.handle === room.administrator
-            || await db_room.is_member({id, user_id: player.id, client})
-            || (await db_room.people({id, client})).invited.some(function (invited) {
-                return invited.handle === player.handle;
-            });
+        const at_table = player.handle === room.administrator || await db_room.is_member({id, user_id: player.id, client});
         if (!at_table) {
-            throw new RoomError('NOT_AT_TABLE', `${player.name} isn't at this table. Invite them first.`);
+            throw new RoomError('NOT_AT_TABLE', `${player.name} hasn't come to this table yet. They can be seated once they open it.`);
         }
         const from = seat_of(room, player.handle);
         if (from !== null && from.team === team && from.seat === index) return;
@@ -266,7 +263,7 @@ async function seat(req, res) {
         if (occupant !== null && from !== null) {
             await db_room.take_seat({id, team: from.team, seat: from.seat, user_id: room.seated_user_ids[occupant.handle], client});
         }
-        // Sitting down answers their invitation, as when they take a seat themself.
+        // A seat answers any invitation they still had, as when they take one themself.
         await db_friends.dismiss_invitation({user_id: player.id, room_id: id, client});
     });
     res.send(await room_payload({id}));

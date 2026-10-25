@@ -87,13 +87,22 @@ describe_with_database('host controls', function () {
         expect((await agents.host.post(`/room/${id}/seat`).send({handle: 'cat', team_handle: 'TEAM_1', seat: 1})).body.error).toBe('NOT_AT_TABLE');
     });
 
-    test('the host seats an invited player, which answers their invitation', async function () {
+    test('the host seats anyone who came to the table, by invitation or by link, but not an invitation still unanswered', async function () {
         const id = await open_room();
         await agents.host.post(`/room/${id}/invite`).send({handle: 'cat'}).expect(200);
         expect((await agents.host.get(`/room/${id}`)).body.invited).toEqual([{handle: 'cat', name: 'P cat', invited_by: 'host'}]);
-        const room = (await agents.host.post(`/room/${id}/seat`).send({handle: 'cat', team_handle: 'TEAM_1', seat: 1}).expect(200)).body;
-        expect(seats(room)).toEqual([[null, 'cat'], [null, null]]);
-        expect(room.invited).toEqual([]);
+        expect((await agents.host.post(`/room/${id}/seat`).send({handle: 'cat', team_handle: 'TEAM_1', seat: 1})).body.error).toBe('NOT_AT_TABLE');
+
+        // cat opens the invitation, ben the link: both can be seated.
+        await agents.cat.post(`/room/${id}/enter`).expect(200);
+        await agents.ben.post(`/room/${id}/enter`).expect(200);
+        const standing = (await agents.host.get(`/room/${id}`)).body;
+        expect(standing.invited).toEqual([]);
+        expect(standing.standing.map((p) => p.handle)).toEqual(['cat', 'ben']);
+        await agents.host.post(`/room/${id}/seat`).send({handle: 'cat', team_handle: 'TEAM_1', seat: 1}).expect(200);
+        const room = (await agents.host.post(`/room/${id}/seat`).send({handle: 'ben', team_handle: 'TEAM_2', seat: 0}).expect(200)).body;
+        expect(seats(room)).toEqual([[null, 'cat'], ['ben', null]]);
+        expect(room.standing).toEqual([]);
         const {rows} = await database.pool.query('SELECT 1 FROM table_invitations WHERE room_id = $1', [id]);
         expect(rows).toEqual([]);
     });
