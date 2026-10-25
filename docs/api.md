@@ -227,8 +227,8 @@ Ends the friendship (and drops invitations between the two): `204`, or `403 NOT_
 
 ### `GET /friends/invitations` (auth) · `DELETE /friends/invitations/:room_id` (auth)
 The `invitations` of `GET /friends/list`; dismissing one is `204`, or `404 INVITATION_NOT_FOUND`. Taking a seat at
-the table removes it too. Each dismissal makes the next invitation to that table wait longer: 5, 15, 30, 60 and then
-120 minutes after the 1st to 5th dismissal. After a 6th (the first invitation plus five re-invites), nobody can invite
+the table removes it too. Each dismissal makes the next invitation to that table wait longer: 10 seconds, 30 seconds, then
+1, 3 and 5 minutes after the 1st to 5th dismissal. After a 6th (the first invitation plus five re-invites), nobody can invite
 that player to that table again.
 
 ### `POST /room/:id/invite {handle}` (auth)
