@@ -338,9 +338,24 @@ Shared errors: `401 NOT_SIGNED_IN`, `403 NOT_HOST` (quick match tables have no h
   if they had no seat. Seating an invited player answers their invitation. `400 SEAT_NOT_FOUND`, `409 NOT_AT_TABLE`.
 - `POST /room/:id/unseat {handle}`: stands a player up. They stay in `standing`. `409 NOT_SEATED`.
 - `POST /room/:id/kick {handle}`: sends a player away: their seat, place at the table and invitation go, and joining
-  answers `REMOVED_BY_HOST` until the host invites them back. They hear `removed_from_table`. `400 CANNOT_KICK_SELF`.
+  answers `REMOVED_BY_HOST` until the host invites them back or lets them back in. They hear `removed_from_table`.
+  `400 CANNOT_KICK_SELF`.
 - `DELETE /room/:id/invitations/:handle`: takes back a player's invitation. They hear `friends_updated`.
   `409 NOT_INVITED`.
+- `POST /room/:id/readmit {handle}`: lets a removed player back, friends or not: they are at the table again
+  (in `standing`) and hear `readmitted_to_table`. `409 NOT_REMOVED`.
+- `GET /room/:id/removed`: `200 {removed: [{handle, name, removed_at, rejoin_requested_at, rejoin_declined}]}`, the
+  players the host sent away, oldest first, with when each asked to come back (or `null`).
+- `DELETE /room/:id/rejoin/:handle`: says no to a removed player's request to come back: `204`, and they hear
+  `rejoin_declined`. They can't ask again (the host can still let them in). `409 NO_REJOIN_REQUEST`.
+
+### Asking to rejoin (auth)
+A player the host removed doesn't need to be the host's friend to come back:
+
+- `GET /room/:id/rejoin`: `200 {removed, requested, declined}`, where you stand.
+- `POST /room/:id/rejoin`: asks the host, once, before the game starts. `200 {removed: true, requested: true,
+  declined: false}`; the host hears `rejoin_requested {room_id, player: {handle, name}}`. `409 NOT_REMOVED`,
+  `409 ALREADY_ASKED`, `403 REJOIN_DECLINED`, `409 GAME_ALREADY_STARTED`, `404 ROOM_NOT_FOUND`.
 
 To list your rooms, see [`GET /user/rooms`](#get-userrooms-auth).
 
@@ -555,6 +570,9 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 | `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
 | `match_found` | `{room_id, players: [handle]}` | The Quick Match queue seated these players at a new table (every seat, bots' too, alike). A waiting page whose player is listed can open the game (polling `GET /matchmaking/queue` says the same) |
 | `removed_from_table` | `{room_id}` | Only to the sockets of a player the host sent away from that table |
+| `rejoin_requested` | `{room_id, player: {handle, name}}` | Only to the host's sockets, when a removed player asks to come back |
+| `readmitted_to_table` | `{room_id}` | Only to the sockets of a removed player the host let back in |
+| `rejoin_declined` | `{room_id}` | Only to the sockets of a removed player whose request the host declined |
 | `friends_updated` | `{}` | Only to the sockets of a player whose friends, requests or invitations changed: re-fetch `GET /friends/list` |
 | `table_invitation` | `{room_id, room_name, from: {handle, name, image}}` | Only to the invited friend's sockets |
 | `table_chat_history` | `{room_id, messages: [Message]}` | Only to the socket that sent `open_table_chat`: the table's last 50 messages, oldest first |
