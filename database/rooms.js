@@ -152,6 +152,77 @@ async function join({id, team_handle: handle, user, client}) {
         'INSERT INTO room_seats (room_id, team, seat, user_id) VALUES ($1, $2, $3, $4)',
         [room.id, team, seat, user.id]
     );
+    await add_member({id: room.id, user_id: user.id, client});
+}
+
+// The user is at the table from now on, seated or not (migration 0024).
+async function add_member({id, user_id, client = pool}) {
+    await client.query('INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [String(id), user_id]);
+}
+
+// Whether the user is at the table: seated, or stood up and still there.
+async function is_member({id, user_id, client = pool}) {
+    const {rowCount} = await client.query('SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    return rowCount > 0;
+}
+
+// Puts the user in the seat, out of any other seat of theirs. Call inside the transaction that locked the room, checked
+// the game hasn't started and freed the seat.
+async function take_seat({id, team, seat, user_id, client}) {
+    await client.query('DELETE FROM room_seats WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    await client.query('INSERT INTO room_seats (room_id, team, seat, user_id) VALUES ($1, $2, $3, $4)', [String(id), team, seat, user_id]);
+    await add_member({id, user_id, client});
+}
+
+// Frees the user's seat, if they have one; they stay at the table. Returns whether they had one.
+async function free_seat({id, user_id, client}) {
+    const {rowCount} = await client.query('DELETE FROM room_seats WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    return rowCount > 0;
+}
+
+// The host sends the user away: out of their seat, off the table and its invitations, and kept from sitting down
+// again. Call inside the transaction that locked the room and checked the game hasn't started.
+async function remove_member({id, user_id, client}) {
+    await client.query('DELETE FROM room_seats WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    await client.query('DELETE FROM room_members WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    await client.query('DELETE FROM table_invitations WHERE room_id = $1 AND invitee_id = $2', [String(id), user_id]);
+    await client.query('INSERT INTO room_bans (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [String(id), user_id]);
+}
+
+// Whether the host sent the user away from the table.
+async function is_banned({id, user_id, client = pool}) {
+    const {rowCount} = await client.query('SELECT 1 FROM room_bans WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+    return rowCount > 0;
+}
+
+// The host invited the user back: they may sit down again.
+async function lift_ban({id, user_id, client = pool}) {
+    await client.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [String(id), user_id]);
+}
+
+// Who is around the table without a seat: {standing: [{handle, name}], invited: [{handle, name, invited_by}]}.
+// Standing players are at the table (they stood up, or the host stood them up); invited ones were asked by a friend
+// and haven't sat down yet. Each list is in the order they arrived.
+async function people({id, client = pool}) {
+    const standing = await client.query(
+        `SELECT users.handle, users.name
+         FROM room_members JOIN users ON users.id = room_members.user_id
+         WHERE room_members.room_id = $1
+           AND NOT EXISTS (SELECT 1 FROM room_seats WHERE room_seats.room_id = $1 AND room_seats.user_id = room_members.user_id)
+         ORDER BY room_members.joined_at, users.handle`,
+        [String(id)]
+    );
+    const invited = await client.query(
+        `SELECT users.handle, users.name, inviters.handle AS invited_by
+         FROM table_invitations
+         JOIN users ON users.id = table_invitations.invitee_id
+         JOIN users AS inviters ON inviters.id = table_invitations.inviter_id
+         WHERE table_invitations.room_id = $1
+           AND NOT EXISTS (SELECT 1 FROM room_members WHERE room_members.room_id = $1 AND room_members.user_id = table_invitations.invitee_id)
+         ORDER BY table_invitations.created_at, users.handle`,
+        [String(id)]
+    );
+    return {standing: standing.rows, invited: invited.rows};
 }
 
 // The host ended the table's rounds. Call inside the transaction that locked the room.
@@ -255,4 +326,5 @@ module.exports = {
     forfeit_seat,
     create, update, get, is_seated, is_full, join, leave, reseat, end_rounds, list_for_user, count_for_user, current_for_user,
     current_match_for_user,
+    add_member, is_member, take_seat, free_seat, remove_member, is_banned, lift_ban, people,
 };

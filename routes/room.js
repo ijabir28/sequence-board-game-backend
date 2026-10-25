@@ -1,5 +1,5 @@
 const room_router =  require('express').Router();
-const {create, join, leave, room, shuffle, update_settings} = require('../controller/room');
+const {create, join, kick, leave, room, seat, shuffle, uninvite, unseat, update_settings} = require('../controller/room');
 const room_game = require('../controller/room_game');
 const friends = require('../controller/friends');
 
@@ -9,6 +9,10 @@ room_router.post('/:id/join', join);
 room_router.post('/:id/leave', leave);
 room_router.post('/:id/invite', friends.invite);
 room_router.post('/:id/shuffle', shuffle);
+room_router.post('/:id/seat', seat);
+room_router.post('/:id/unseat', unseat);
+room_router.post('/:id/kick', kick);
+room_router.delete('/:id/invitations/:handle', uninvite);
 room_router.patch('/:id/settings', update_settings);
 room_router.post('/:id/start', room_game.start);
 room_router.get('/:id/game', room_game.get);
