@@ -97,6 +97,42 @@ async function join(req, res) {
 }
 
 /**
+ * POST /room/:id/enter: a signed-in player opened the table's page. Before the game starts that puts them at the table
+ * (unseated, so the host can seat them) and in their "Your tables", unless the host removed them or it is the host's own
+ * table; coming by invitation answers it. 200 {member, removed}: whether they are at the table now, and whether the host
+ * removed them.
+ */
+async function enter(req, res) {
+    const user = await db_user.get_user({handle: req.handle});
+    if (user === undefined) {
+        throw new RoomError('NOT_SIGNED_IN', 'Sign in to sit at this table.');
+    }
+    const {id} = req.params;
+    const result = await transaction(async function (client) {
+        const room = await db_room.get({id, client, lock: true});
+        if (room === undefined) {
+            throw new RoomError('ROOM_NOT_FOUND', 'There is no table with that code.');
+        }
+        if (await db_room.is_banned({id, user_id: user.id, client})) {
+            return {member: false, removed: true, added: false};
+        }
+        const started = await db_game.get({room_id: id, client}) !== undefined;
+        if (started || room.matchmaking || room.administrator === user.handle) {
+            return {member: await db_room.is_member({id, user_id: user.id, client}), removed: false, added: false};
+        }
+        const added = await db_room.add_member({id, user_id: user.id, client});
+        // Coming to the table answers an invitation to it (without counting as turning it down).
+        const answered = await db_friends.dismiss_invitation({user_id: user.id, room_id: id, client});
+        return {member: true, removed: false, added: added || answered};
+    });
+    res.send({member: result.member, removed: result.removed});
+    if (result.added) {
+        socket_server.send_to({handle: user.handle, event: 'friends_updated', data: {}});
+        await broadcast_room({id});
+    }
+}
+
+/**
  * POST /room/:id/leave: stand up from your seat before the game starts, so you can take another (or let the
  * host reshuffle the teams). 200 with the room; JSON errors.
  */
@@ -502,6 +538,7 @@ function handler(action) {
 module.exports = {
     create: handler(create),
     join: handler(join),
+    enter: handler(enter),
     room: handler(room),
     update_settings: handler(update_settings),
     leave: handler(leave),

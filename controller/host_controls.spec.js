@@ -210,11 +210,46 @@ describe_with_database('host controls', function () {
         expect(await join('ann', id, 'TEAM_1')).toBe('success');
     });
 
+    test('opening a table puts a player at it and in their tables, until the host removes them', async function () {
+        await sign_up('eve');
+        const id = await open_room();
+        const tables = async (handle) => (await agents[handle].get('/user/rooms').expect(200)).body.rooms.map((room) => room.id);
+        expect(await tables('eve')).not.toContain(id);
+
+        // By link: no invitation, not a friend.
+        expect((await agents.eve.post(`/room/${id}/enter`).expect(200)).body).toEqual({member: true, removed: false});
+        expect((await agents.host.get(`/room/${id}`)).body.standing).toEqual([{handle: 'eve', name: 'P eve'}]);
+        expect(await tables('eve')).toContain(id);
+        // Sitting down and standing up again keeps the table in her list.
+        expect(await join('eve', id, 'TEAM_1')).toBe('success');
+        await agents.eve.post(`/room/${id}/leave`).expect(200);
+        expect(await tables('eve')).toContain(id);
+
+        // By invitation: coming answers it, and isn't turning it down.
+        await agents.host.post(`/room/${id}/invite`).send({handle: 'cat'}).expect(200);
+        await agents.cat.post(`/room/${id}/enter`).expect(200);
+        const room = (await agents.host.get(`/room/${id}`)).body;
+        expect(room.invited).toEqual([]);
+        expect(room.standing.map((p) => p.handle)).toEqual(['eve', 'cat']);
+        expect((await agents.host.get(`/room/${id}/invite-status`)).body.dismissed).toEqual([]);
+
+        // The host's own table: they aren't counted as standing.
+        expect((await agents.host.post(`/room/${id}/enter`).expect(200)).body).toEqual({member: false, removed: false});
+
+        await agents.host.post(`/room/${id}/kick`).send({handle: 'eve'}).expect(200);
+        expect(await tables('eve')).not.toContain(id);
+        expect((await agents.eve.post(`/room/${id}/enter`).expect(200)).body).toEqual({member: false, removed: true});
+        expect((await agents.host.get(`/room/${id}`)).body.standing.map((p) => p.handle)).toEqual(['cat']);
+        expect((await request(app).post(`/room/${id}/enter`)).status).toBe(401);
+    });
+
     test('seats are fixed once the game starts', async function () {
         const id = await open_room(2, 1);
         expect(await join('ann', id, 'TEAM_1')).toBe('success');
         expect(await join('ben', id, 'TEAM_2')).toBe('success');
         await agents.host.post(`/room/${id}/start`).expect(200);
+        // Opening the table now is watching it, not coming to sit down.
+        expect((await agents.cat.post(`/room/${id}/enter`).expect(200)).body).toEqual({member: false, removed: false});
         for (const path of ['unseat', 'kick']) {
             expect((await agents.host.post(`/room/${id}/${path}`).send({handle: 'ann'})).body.error).toBe('GAME_ALREADY_STARTED');
         }

@@ -155,9 +155,10 @@ async function join({id, team_handle: handle, user, client}) {
     await add_member({id: room.id, user_id: user.id, client});
 }
 
-// The user is at the table from now on, seated or not (migration 0024).
+// The user is at the table from now on, seated or not (migration 0024). Returns whether they weren't before.
 async function add_member({id, user_id, client = pool}) {
-    await client.query('INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [String(id), user_id]);
+    const {rowCount} = await client.query('INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [String(id), user_id]);
+    return rowCount > 0;
 }
 
 // Whether the user is at the table: seated, or stood up and still there.
@@ -285,8 +286,10 @@ async function end_rounds({id, client}) {
     await client.query('UPDATE rooms SET rounds_ended_at = now() WHERE id = $1', [String(id)]);
 }
 
+// The tables a user opened, sat at, or is at without a seat (they came to it, and the host didn't send them away).
 const USER_ROOMS_WHERE = `rooms.administrator_id = $1
-         OR EXISTS (SELECT 1 FROM room_seats WHERE room_seats.room_id = rooms.id AND room_seats.user_id = $1)`;
+         OR EXISTS (SELECT 1 FROM room_seats WHERE room_seats.room_id = rooms.id AND room_seats.user_id = $1)
+         OR EXISTS (SELECT 1 FROM room_members WHERE room_members.room_id = rooms.id AND room_members.user_id = $1)`;
 
 // How many rooms list_for_user() can return in all, for paging.
 async function count_for_user({user_id, client = pool}) {
@@ -332,7 +335,7 @@ async function reseat({id, seats, client}) {
     }
 }
 
-// The rooms a user created or sat at, newest first (ties by code, so pages never overlap).
+// The rooms a user created, sat at or came to, newest first (ties by code, so pages never overlap).
 async function list_for_user({user_id, limit = 50, offset = 0, client = pool}) {
     const {rows} = await client.query(
         `${USER_ROOMS_SELECT}

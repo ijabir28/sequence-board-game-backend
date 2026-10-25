@@ -110,7 +110,8 @@ All need the session cookie and a trusted `Origin`.
   device at a time that is just this one. `POST /api/auth/revoke-other-sessions {}` still deletes all but this one.
 
 ### `GET /user/rooms` (auth)
-One page of the tables you created or sat at, newest first. Query `page` (from 1, default 1) and `per_page`
+One page of the tables you created, sat at, or are at without a seat (you opened the table's page before its game
+started, by invitation, code or link, and the host hasn't removed you), newest first. Query `page` (from 1, default 1) and `per_page`
 (default 10, at most 50); missing or invalid values use the defaults. A page past the end has no rooms.
 `401 NOT_SIGNED_IN` without a session.
 
@@ -122,7 +123,7 @@ One page of the tables you created or sat at, newest first. Query `page` (from 1
   "administrator_name": "Jabir ibne kamal",
   "team_count": 2, "players_per_team": 1, "seats_taken": 2,
   "settings": {"history": false, "highlights": false, "auto_draw_dead": false, "turn_seconds": 90, "dead_cards": "manual", "exchanges_per_turn": null},
-  "your_team": 0,                      // null when you only created the table
+  "your_team": 0,                      // null when you have no seat there
   "status": "playing",                 // open (no game yet) | playing | finished, of the current round
   "started_at": "…", "last_move_at": "…", "finished_at": null, "winner_team": null,
   "move_count": 12,                    // the game columns are the current (latest) round's
@@ -305,6 +306,13 @@ Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead
 }
 ```
 Team handles are `TEAM_1 … TEAM_n`. Empty seats are `null`. Player objects are `{handle, name}`.
+
+### `POST /room/:id/enter` (auth)
+The table's page calls this when a signed-in player opens it. Before the game starts it puts them at the table without
+a seat (in `standing`, and in their `GET /user/rooms`), and answers their invitation to it without counting it as
+turned down; `room_updated` is broadcast when that changes anything. Nothing changes for the host's own table, a quick
+match, a game already started, or a player the host removed. `200 {member, removed}`. `401 NOT_SIGNED_IN`,
+`404 ROOM_NOT_FOUND`.
 
 ### `POST /room/:id/join` (auth)
 Body `{team_handle}`. Takes the first empty seat in that team. Always HTTP `200`; check `message`:
