@@ -578,7 +578,7 @@ Same origin and port as HTTP, default path `/socket.io`. The server also serves 
 
 | Event (server → client) | Payload | When |
 |---|---|---|
-| `room_updated` | Room (see above), or `{id, deleted: true}` | After every successful join or game start, or when an idle table is deleted, sent to **every** connected socket |
+| `room_updated` | Room (see above), or `{id, deleted: true}` | After every change to a table (joins, seating, settings, game start), or when an idle table is deleted, sent to **every** connected socket. The Room is the same one `GET /room/:id` answers, so a page showing that table can use it as is instead of fetching again; ignore other tables' ids. Each table's broadcasts arrive newest last, and a burst of changes is coalesced |
 | `teams_shuffled` | `{room_id, by: {handle, name}, room}` | After the host shuffles the teams (`room` is the new seating), so clients can tell players their new team |
 | `game_updated` | `{room_id}` | After a table game starts or changes. Re-fetch `GET /room/:id/game`; the payload has no hands |
 | `spectators_updated` | `{room_id, count}` | A spectator started or stopped watching that table's game |
