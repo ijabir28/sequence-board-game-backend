@@ -9,6 +9,7 @@ const {
     is_slug,
     parse_settings,
     shuffle_seats,
+    resize_seats,
 } = require('./room');
 
 function fixed(value) {
@@ -145,5 +146,36 @@ describe('shuffle_seats', function () {
         expect(new Set(seats.map(function (s) {
             return `${s.team}-${s.seat}`;
         })).size).toBe(4);
+    });
+});
+
+describe('resize_seats', function () {
+    function places(seats) {
+        return seats.map(function (s) {
+            return [s.player, s.team, s.seat];
+        });
+    }
+
+    test('keeps everyone who still has their seat', function () {
+        const seats = [{team: 0, seat: 0, player: 'a'}, {team: 1, seat: 0, player: 'b'}];
+        expect(places(resize_seats(seats, 3, 2))).toEqual([['a', 0, 0], ['b', 1, 0]]);
+    });
+
+    test('moves a player from a dropped seat to an open seat on their team first', function () {
+        const seats = [{team: 0, seat: 2, player: 'a'}, {team: 1, seat: 0, player: 'b'}];
+        expect(places(resize_seats(seats, 2, 2))).toEqual([['a', 0, 0], ['b', 1, 0]]);
+    });
+
+    test('moves a player from a dropped team to the first open seat anywhere', function () {
+        const seats = [{team: 0, seat: 0, player: 'a'}, {team: 2, seat: 0, player: 'c'}];
+        expect(places(resize_seats(seats, 2, 1))).toEqual([['a', 0, 0], ['c', 1, 0]]);
+    });
+
+    test('leaves players without a seat when the smaller table is full', function () {
+        const seats = [
+            {team: 0, seat: 0, player: 'a'}, {team: 1, seat: 0, player: 'b'},
+            {team: 0, seat: 1, player: 'c'}, {team: 1, seat: 1, player: 'd'},
+        ];
+        expect(places(resize_seats(seats, 2, 1))).toEqual([['a', 0, 0], ['b', 1, 0]]);
     });
 });

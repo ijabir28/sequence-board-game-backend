@@ -126,6 +126,52 @@ function shuffle_seats(players, team_count, players_per_team, random = Math.rand
     });
 }
 
+/**
+ * Fits seated players into a resized table. A player whose seat still exists keeps it; the others move to the first
+ * open seat on their own team, then to the first open seat anywhere (seat 0 of every team, then seat 1, ...). Those left
+ * over have no seat. `seats` and the result are [{team, seat, player}], in seat order.
+ */
+function resize_seats(seats, team_count, players_per_team) {
+    const ordered = seats.slice().sort(function (a, b) {
+        return a.team - b.team || a.seat - b.seat;
+    });
+    const taken = new Set();
+    const key = function (team, seat) {
+        return `${team}:${seat}`;
+    };
+    const kept = [];
+    const displaced = [];
+    ordered.forEach(function (entry) {
+        if (entry.team < team_count && entry.seat < players_per_team) {
+            kept.push(entry);
+            taken.add(key(entry.team, entry.seat));
+        } else {
+            displaced.push(entry);
+        }
+    });
+    const open_seat = function (team) {
+        for (let seat = 0; seat < players_per_team; seat++) {
+            if (!taken.has(key(team, seat))) return seat;
+        }
+        return -1;
+    };
+    const moved = [];
+    displaced.forEach(function ({team, player}) {
+        let place = team < team_count && open_seat(team) >= 0 ? {team, seat: open_seat(team)} : null;
+        for (let seat = 0; place === null && seat < players_per_team; seat++) {
+            for (let other = 0; place === null && other < team_count; other++) {
+                if (!taken.has(key(other, seat))) place = {team: other, seat};
+            }
+        }
+        if (place === null) return;
+        taken.add(key(place.team, place.seat));
+        moved.push(Object.assign({player}, place));
+    });
+    return kept.concat(moved).sort(function (a, b) {
+        return a.team - b.team || a.seat - b.seat;
+    });
+}
+
 function parse_turn_seconds(value) {
     const seconds = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
     if (Number.isInteger(seconds) && seconds >= TURN_SECONDS_MIN && seconds <= TURN_SECONDS_MAX) return seconds;
@@ -191,4 +237,5 @@ module.exports = {
     is_slug,
     parse_settings,
     shuffle_seats,
+    resize_seats,
 };

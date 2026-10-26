@@ -165,6 +165,23 @@ describe_with_database('rooms and table games', function () {
             const late = await agents.alice.patch(`/room/${id}/settings`).send({history: false});
             expect([late.status, late.body.error]).toEqual([409, 'GAME_ALREADY_STARTED']);
         });
+
+        test('the host resizes the table before the game starts, and seated players keep a seat where they can', async function () {
+            const id = await open_room('alice', 3, 1);
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_3');
+            const resized = await agents.alice.patch(`/room/${id}/settings`).send({number_of_team: 2, number_of_player_in_each_team: 2});
+            expect(resized.status).toBe(200);
+            expect(resized.body.teams.map(function (team) {
+                return team.players.map(function (player) {
+                    return player && player.handle;
+                });
+            })).toEqual([['alice', null], ['bob', null]]);
+
+            const odd = await agents.alice.patch(`/room/${id}/settings`).send({number_of_team: 3, number_of_player_in_each_team: 5});
+            expect([odd.status, odd.body.error]).toEqual([400, 'UNSUPPORTED_TABLE']);
+            expect((await agents.bob.patch(`/room/${id}/settings`).send({number_of_team: 3})).body.error).toBe('NOT_HOST');
+        });
     });
 
     test('GET /room/:id of an unknown id is an empty 200, as before', async function () {

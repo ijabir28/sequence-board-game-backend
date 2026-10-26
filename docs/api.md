@@ -278,9 +278,11 @@ default 24): opened earlier, with nobody sitting down or being invited since. Th
 `room_updated {id, deleted: true}` is broadcast for each, and invited players hear `friends_updated`.
 
 ### `PATCH /room/:id/settings` (auth, host)
-Body `{name?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead_cards?, exchanges_per_turn?}`; missing keys keep their value. The code never changes.
+Body `{name?, number_of_team?, number_of_player_in_each_team?, mode?, history?, highlights?, auto_draw_dead?, turn_seconds?, dead_cards?, exchanges_per_turn?}`; missing keys keep their value. The code never changes.
+Resizing keeps every player whose seat still exists; players of dropped seats move to the first open seat on their own
+team, then anywhere, and stay at the table unseated when the smaller table is full.
 `200` with the Room, and `room_updated` is broadcast. `401 NOT_SIGNED_IN`, `403 NOT_HOST`, `404 ROOM_NOT_FOUND`,
-`409 GAME_ALREADY_STARTED` (settings are fixed once the game starts), `400 INVALID_NAME | INVALID_SETTINGS`.
+`409 GAME_ALREADY_STARTED` (settings are fixed once the game starts), `400 INVALID_NAME | INVALID_SETTINGS | UNSUPPORTED_TABLE`.
 
 ### `GET /room/:id`
 `200` with a Room, or `200` with an **empty body** when the id doesn't exist.
