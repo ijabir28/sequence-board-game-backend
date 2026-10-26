@@ -85,9 +85,9 @@ describe_with_database('quick match', function () {
     });
 
     test('needs a signed-in player and a table shape it offers', async function () {
-        expect((await request(app).post('/matchmaking/queue').send({teams: 2, timer: 'blitz'})).status).toBe(401);
+        expect((await request(app).post('/matchmaking/queue').send({teams: 2, timer: 'fast'})).status).toBe(401);
         expect((await request(app).get('/matchmaking/queue')).status).toBe(401);
-        for (const body of [{teams: 4, timer: 'blitz'}, {teams: 2, timer: 'forever'}, {}]) {
+        for (const body of [{teams: 4, timer: 'fast'}, {teams: 2, timer: 'forever'}, {}]) {
             const response = await queue('alice', body);
             expect([response.status, response.body.error]).toEqual([400, 'INVALID_MATCH_SETTINGS']);
         }
@@ -101,20 +101,20 @@ describe_with_database('quick match', function () {
         expect(body.bots_at).toBeUndefined();
         expect(body.waiting).toBeUndefined();
         // Someone who wants a different table isn't matched with her.
-        expect((await queue('bob', {teams: 2, timer: 'blitz'}).expect(200)).body.status).toBe('queued');
+        expect((await queue('bob', {teams: 2, timer: 'fast'}).expect(200)).body.status).toBe('queued');
         expect((await agents.alice.delete('/matchmaking/queue').expect(200)).body).toEqual({status: 'idle'});
         expect((await agents.alice.get('/matchmaking/queue').expect(200)).body).toEqual({status: 'idle'});
     });
 
     test('seats two players who asked for the same table, one per team, and deals at once', async function () {
-        await queue('alice', {teams: 2, timer: 'blitz'}).expect(200);
-        const {body} = await queue('bob', {teams: 2, timer: 'blitz'}).expect(200);
+        await queue('alice', {teams: 2, timer: 'fast'}).expect(200);
+        const {body} = await queue('bob', {teams: 2, timer: 'fast'}).expect(200);
         expect(body.status).toBe('matched');
         const id = body.room_id;
         expect((await agents.alice.get('/matchmaking/queue').expect(200)).body).toEqual({status: 'matched', room_id: id});
 
         const room = (await agents.alice.get(`/room/${id}`).expect(200)).body;
-        expect(room).toEqual(expect.objectContaining({name: 'Quick Match · Blitz', game_started: true, round: 1}));
+        expect(room).toEqual(expect.objectContaining({name: 'Quick Match · Fast', game_started: true, round: 1}));
         expect(room.settings.turn_seconds).toBe(15);
         expect(room.teams.map(function (team) {
             return team.players.map(function (player) {
@@ -299,7 +299,7 @@ describe_with_database('quick match', function () {
 
             // Once is enough, and fay is free to queue again.
             expect((await agents.fay.post(`/room/${id}/game/forfeit`)).body.error).toBe('FORFEITED');
-            expect((await queue('fay', {teams: 2, timer: 'blitz'}).expect(200)).body.status).toBe('queued');
+            expect((await queue('fay', {teams: 2, timer: 'fast'}).expect(200)).body.status).toBe('queued');
             await agents.fay.delete('/matchmaking/queue').expect(200);
         });
 
@@ -312,7 +312,7 @@ describe_with_database('quick match', function () {
             expect(await board_entry('hal')).toEqual(expect.objectContaining({played: 1, won: 0}));
             expect((await board_entry('hal')).rating).toBeLessThan(1200);
             expect((await agents.hal.post(`/room/${id}/game/pass`)).body.error).toBe('FORFEITED');
-            expect((await queue('hal', {teams: 2, timer: 'blitz'}).expect(200)).body.status).toBe('queued');
+            expect((await queue('hal', {teams: 2, timer: 'fast'}).expect(200)).body.status).toBe('queued');
             await agents.hal.delete('/matchmaking/queue').expect(200);
 
             // The others see the same table as before: same names, nothing about a forfeit or a bot.

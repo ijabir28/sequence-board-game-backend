@@ -164,7 +164,7 @@ Players queue for a table shape and the server seats them with others who asked 
 [architecture](architecture.md#quick-match-and-bots).
 
 ### `POST /matchmaking/queue {teams, timer}` (auth)
-Joins the queue. `teams` is `2` or `3` (always one player per team); `timer` is `blitz` (15 s turns), `medium` (45 s)
+Joins the queue. `teams` is `2` or `3` (always one player per team); `timer` is `fast` (15 s turns), `medium` (45 s)
 or `slow` (90 s). Every other setting is the default of a new table. Asking again with another shape moves the player
 to that queue (keeping their place only for the same shape). Answers `200` with the status (below): `matched` at once
 when enough players were waiting, else `queued`; `playing` (and not queued) when the player already has a quick match in
@@ -174,7 +174,7 @@ progress, which they should go back to. `400 INVALID_MATCH_SETTINGS`, `401 NOT_S
 The status. A waiting page must call it every few seconds: a player not heard from for 30 seconds has left the queue.
 
 ```jsonc
-{"status": "queued", "teams": 2, "timer": "blitz", "turn_seconds": 15,
+{"status": "queued", "teams": 2, "timer": "fast", "turn_seconds": 15,
  "joined_at": "…",                  // nothing says when bots would be brought in, or who else waits
  "server_time": "…"}
 {"status": "matching"}               // the table is being made: ask again

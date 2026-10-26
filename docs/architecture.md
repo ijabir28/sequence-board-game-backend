@@ -206,7 +206,7 @@ moves, keyed to user ids rather than display names.
 ## Quick Match and bots
 
 `controller/matchmaking.js` keeps one queue per table shape: 2 or 3 teams of one player (so nobody shares a team with
-a stranger) and a turn timer (blitz 15 s, medium 45 s, slow 90 s); everything else is a new table's default. When as
+a stranger) and a turn timer (fast 15 s, medium 45 s, slow 90 s); everything else is a new table's default. When as
 many players as teams wait for the same shape, the oldest are matched; once the oldest has waited two minutes, they
 are matched with whoever else waits and bots take the other seats (`entity/matchmaking.js`). The queue lives in memory
 (one server), so a restart empties it, and waiting pages check in every few seconds: an entry not seen for 30 seconds

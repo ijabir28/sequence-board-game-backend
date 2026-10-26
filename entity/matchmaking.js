@@ -9,7 +9,7 @@
 // closed) is dropped, so nobody is seated at a game they've left.
 
 /** Turn timer choices, in seconds. */
-const TIMERS = Object.freeze({blitz: 15, medium: 45, slow: 90});
+const TIMERS = Object.freeze({fast: 15, medium: 45, slow: 90});
 const TEAM_COUNTS = Object.freeze([2, 3]);
 
 /** How long a player waits for other people before bots fill the table. */
@@ -33,7 +33,7 @@ function parse_config(body = {}) {
     }
     const timer = String(body.timer);
     if (!Object.prototype.hasOwnProperty.call(TIMERS, timer)) {
-        throw new MatchmakingError('INVALID_MATCH_SETTINGS', 'Choose a turn timer: blitz (15 s), medium (45 s) or slow (90 s).');
+        throw new MatchmakingError('INVALID_MATCH_SETTINGS', 'Choose a turn timer: fast (15 s), medium (45 s) or slow (90 s).');
     }
     return {teams, timer, turn_seconds: TIMERS[timer]};
 }

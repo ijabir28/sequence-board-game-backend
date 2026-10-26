@@ -25,7 +25,7 @@ const MATCHED_KEPT_MS = 5 * 60 * 1000;
 // Handles of matched players whose table is being made: neither waiting nor seated yet, and not to be queued again.
 const pending = new Set();
 
-const TIMER_NAMES = {blitz: 'Blitz', medium: 'Medium', slow: 'Slow'};
+const TIMER_NAMES = {fast: 'Fast', medium: 'Medium', slow: 'Slow'};
 
 const STATUS_BY_ERROR = {
     NOT_SIGNED_IN: 401,
@@ -142,7 +142,7 @@ async function status_of(player, now) {
 }
 
 /**
- * POST /matchmaking/queue {teams: 2|3, timer: blitz|medium|slow}: joins the queue (or moves to that configuration).
+ * POST /matchmaking/queue {teams: 2|3, timer: fast|medium|slow}: joins the queue (or moves to that configuration).
  * Answers with the status: `queued`, or `matched` when the table was made at once, or `playing` (and not queued) for
  * a player who already has a quick match in progress, or `matching` while their table is being made.
  */
