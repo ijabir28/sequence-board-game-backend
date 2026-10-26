@@ -4,9 +4,9 @@ function player(handle) {
     return {user_id: handle.length, handle, name: handle.toUpperCase()};
 }
 
-const TWO_FAST = {teams: 2, timer: 'fast', turn_seconds: 15};
-const THREE_FAST = {teams: 3, timer: 'fast', turn_seconds: 15};
-const TWO_SLOW = {teams: 2, timer: 'slow', turn_seconds: 90};
+const TWO_FAST = {teams: 2, timer: 'fast', turn_seconds: 15, clock_seconds: null};
+const THREE_FAST = {teams: 3, timer: 'fast', turn_seconds: 15, clock_seconds: null};
+const TWO_SLOW = {teams: 2, timer: 'slow', turn_seconds: 90, clock_seconds: null};
 
 function handles(match) {
     return match.entries.map(function (entry) {
@@ -17,8 +17,10 @@ function handles(match) {
 describe('parse_config', function () {
     test('reads the teams and the timer', function () {
         expect(parse_config({teams: 2, timer: 'fast'})).toEqual(TWO_FAST);
-        expect(parse_config({teams: '3', timer: 'medium'})).toEqual({teams: 3, timer: 'medium', turn_seconds: 45});
+        expect(parse_config({teams: '3', timer: 'medium'})).toEqual({teams: 3, timer: 'medium', turn_seconds: 45, clock_seconds: null});
         expect(parse_config({teams: 2, timer: 'slow'})).toEqual(TWO_SLOW);
+        // Blitz is a 5 minute clock for each player's whole game, the turn timer left at its default.
+        expect(parse_config({teams: 2, timer: 'blitz'})).toEqual({teams: 2, timer: 'blitz', turn_seconds: 90, clock_seconds: 300});
     });
 
     test('refuses anything else', function () {

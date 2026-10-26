@@ -81,7 +81,7 @@ database/
                       0009 turn deadlines, 0010 dead card settings, 0011 Better Auth tables, 0013 game rounds,
                       0016 drops the retired game mode, 0017 leaderboard ratings, 0018 bots, matchmaking
                       tables and their leaderboard, 0019 bot names, 0020 quick match forfeits, 0022 friendships
-                      and table invitations, 0023 letting friends watch (off by default)
+                      and table invitations, 0023 letting friends watch (off by default), 0027 the blitz clock
   users.js            Reads accounts (Better Auth writes them), their game stats, and stores avatars
   seed.js             Development accounts jabir/1, sakib/123 (`npm run db:seed`)
   test_database.js    Gives a spec its own migrated schema (needs DATABASE_URL)
@@ -141,7 +141,7 @@ the whole server, not one per room.
 
 | Table | One row per | Notes |
 |---|---|---|
-| `rooms` | table | Code (`id`, a slug of the name such as `friday-night-k3m9`; older rooms have numeric codes), name, creator, team layout, settings (`history_enabled`, `highlights_enabled`, `auto_draw_dead`, `turn_seconds`), creation time |
+| `rooms` | table | Code (`id`, a slug of the name such as `friday-night-k3m9`; older rooms have numeric codes), name, creator, team layout, settings (`history_enabled`, `highlights_enabled`, `auto_draw_dead`, `turn_seconds`, `clock_seconds`), creation time |
 | `room_seats` | taken seat | Primary key (room, team, seat) and unique (room, user): one player per seat, one seat per player. Rows can be removed (standing up, reshuffling) only until the game starts; after that they are the room's history |
 | `games` | round of a room's game | Round number (the highest is the table's current game), full rules state as JSONB (hands and deck included, so only `view_for()` output is ever sent), started / updated / finished time, winning team, the round's statistics once won |
 | `player_ratings` | player with a won round | Elo rating (from 1200), rounds played and won; the all-time leaderboard |
@@ -170,6 +170,12 @@ Each game also stores `turn_deadline` (the turn's start plus the room's `turn_se
 a random card for the current player (`random_move()`), in the same locked transaction as a normal move. It re-checks
 the deadline inside the transaction, so a move made just in time wins. The app itself doesn't start the sweeper, so
 tests drive it with `expire_overdue_turns()`. Games resumed after a restart keep their deadlines.
+
+Blitz (`clock_seconds`, 0027) swaps the per-turn timer for a chess-style clock. Each round's state starts with
+`clocks`, every team's time in ms; when a turn ends `stamp_turn()` charges its running time (paused time aside) to its
+team, and the deadline becomes the turn's start plus what its team has left. A team out of time gets a deadline equal
+to its turn's start, so the sweeper plays for it at once, every turn, until the round ends. Bots spend at most a
+twentieth of their clock thinking.
 
 A table plays its game in rounds. Once a round is won, its statistics (`entity/rounds.js`) are saved with the
 winning move, and the host deals the next round as a new `games` row with the same teams (seats stay fixed) or ends
@@ -206,7 +212,7 @@ moves, keyed to user ids rather than display names.
 ## Quick Match and bots
 
 `controller/matchmaking.js` keeps one queue per table shape: 2 or 3 teams of one player (so nobody shares a team with
-a stranger) and a turn timer (fast 15 s, medium 45 s, slow 90 s); everything else is a new table's default. When as
+a stranger) and a timer (fast 15 s, medium 45 s or slow 90 s per turn, or blitz: a 5 minute clock each); everything else is a new table's default. When as
 many players as teams wait for the same shape, the oldest are matched; once the oldest has waited two minutes, they
 are matched with whoever else waits and bots take the other seats (`entity/matchmaking.js`). The queue lives in memory
 (one server), so a restart empties it, and waiting pages check in every few seconds: an entry not seen for 30 seconds

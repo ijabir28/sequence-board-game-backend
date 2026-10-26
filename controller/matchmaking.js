@@ -8,7 +8,7 @@ const {deal_first_round} = require('./room_game');
 const {broadcast_room} = require('./room');
 const socket_server = require('../socket');
 
-// Quick Match: players queue for a table shape (2 or 3 teams of one, and a turn timer) and the server seats them
+// Quick Match: players queue for a table shape (2 or 3 teams of one, and a turn timer or the blitz clock) and the server seats them
 // with others who asked for the same, or with bots once they've waited two minutes (entity/matchmaking.js). The
 // table is dealt straight away and plays one round, rated on the matchmaking leaderboard. Errors are JSON:
 // {error: CODE, message}.
@@ -25,7 +25,7 @@ const MATCHED_KEPT_MS = 5 * 60 * 1000;
 // Handles of matched players whose table is being made: neither waiting nor seated yet, and not to be queued again.
 const pending = new Set();
 
-const TIMER_NAMES = {fast: 'Fast', medium: 'Medium', slow: 'Slow'};
+const TIMER_NAMES = {fast: 'Fast', medium: 'Medium', slow: 'Slow', blitz: 'Blitz'};
 
 const STATUS_BY_ERROR = {
     NOT_SIGNED_IN: 401,
@@ -69,7 +69,7 @@ async function create_match(match) {
         administrator_id: entries[0].player.user_id,
         team_count: config.teams,
         players_per_team: 1,
-        settings: Object.assign({}, DEFAULT_SETTINGS, {turn_seconds: config.turn_seconds}),
+        settings: Object.assign({}, DEFAULT_SETTINGS, {turn_seconds: config.turn_seconds, clock_seconds: config.clock_seconds}),
         matchmaking: true,
     });
     await transaction(async function (client) {
@@ -128,6 +128,7 @@ async function status_of(player, now) {
             teams: entry.config.teams,
             timer: entry.config.timer,
             turn_seconds: entry.config.turn_seconds,
+            clock_seconds: entry.config.clock_seconds,
             joined_at: new Date(entry.joined_at).toISOString(),
             server_time: new Date(now).toISOString(),
         };
@@ -142,7 +143,7 @@ async function status_of(player, now) {
 }
 
 /**
- * POST /matchmaking/queue {teams: 2|3, timer: fast|medium|slow}: joins the queue (or moves to that configuration).
+ * POST /matchmaking/queue {teams: 2|3, timer: fast|medium|slow|blitz}: joins the queue (or moves to that configuration).
  * Answers with the status: `queued`, or `matched` when the table was made at once, or `playing` (and not queued) for
  * a player who already has a quick match in progress, or `matching` while their table is being made.
  */

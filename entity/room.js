@@ -23,6 +23,15 @@ const TURN_TIMER_PRESETS = Object.freeze([30, 60, 90, 120, 180]);
 const TURN_SECONDS_MIN = 15;
 const TURN_SECONDS_MAX = 600;
 
+/**
+ * Blitz, a chess-style clock: each team has this long for the whole round, spent only while it is their turn. A team
+ * whose clock runs out has a random card played for it at once on each of its turns. Hosts are offered 5 minutes; any
+ * whole number of seconds in the allowed range also works.
+ */
+const BLITZ_CLOCK_SECONDS = 300;
+const CLOCK_SECONDS_MIN = 60;
+const CLOCK_SECONDS_MAX = 3600;
+
 /** What a room does when its creator doesn't say otherwise. */
 const DEFAULT_SETTINGS = Object.freeze({
     // Players can read every move so far (the move log and GET /room/:id/turns). Off unless the host turns it on.
@@ -37,6 +46,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     exchanges_per_turn: null,
     // How long each player has for a turn.
     turn_seconds: 90,
+    // Blitz: each team's time for the whole round, in seconds, in place of the turn timer. Null is off.
+    clock_seconds: null,
 });
 
 class RoomError extends Error {
@@ -181,6 +192,16 @@ function parse_turn_seconds(value) {
     );
 }
 
+function parse_clock_seconds(value) {
+    if (value === null || value === 'off') return null;
+    const seconds = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+    if (Number.isInteger(seconds) && seconds >= CLOCK_SECONDS_MIN && seconds <= CLOCK_SECONDS_MAX) return seconds;
+    throw new RoomError(
+        'INVALID_SETTINGS',
+        `The blitz clock must be "off" or a whole number of seconds from ${CLOCK_SECONDS_MIN} to ${CLOCK_SECONDS_MAX}.`
+    );
+}
+
 function parse_dead_cards(value) {
     if (DEAD_CARD_MODES.includes(value)) return value;
     throw new RoomError('INVALID_SETTINGS', `The setting "dead_cards" must be one of: ${DEAD_CARD_MODES.join(', ')}.`);
@@ -198,6 +219,7 @@ function parse_exchanges_per_turn(value) {
 
 const PARSERS = {
     turn_seconds: parse_turn_seconds,
+    clock_seconds: parse_clock_seconds,
     dead_cards: parse_dead_cards,
     exchanges_per_turn: parse_exchanges_per_turn,
 };
@@ -210,8 +232,8 @@ function parse_flag(value, key) {
 
 /**
  * Reads settings from a request body. Only keys in DEFAULT_SETTINGS are read; a missing key keeps the value
- * from `current` (the defaults for a new room). Throws INVALID_SETTINGS for an unknown dead card mode, a turn timer out of
- * range, or a flag that isn't a boolean.
+ * from `current` (the defaults for a new room). Throws INVALID_SETTINGS for an unknown dead card mode, a turn timer or blitz
+ * clock out of range, or a flag that isn't a boolean.
  */
 function parse_settings(body = {}, current = DEFAULT_SETTINGS) {
     const settings = Object.assign({}, current);
@@ -229,6 +251,9 @@ module.exports = {
     TURN_TIMER_PRESETS,
     TURN_SECONDS_MIN,
     TURN_SECONDS_MAX,
+    BLITZ_CLOCK_SECONDS,
+    CLOCK_SECONDS_MIN,
+    CLOCK_SECONDS_MAX,
     NAME_MAX_LENGTH,
     generate_name,
     normalize_name,

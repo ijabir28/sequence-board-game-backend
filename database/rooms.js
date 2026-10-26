@@ -19,6 +19,7 @@ const SETTING_COLUMNS = {
     highlights: 'highlights_enabled',
     auto_draw_dead: 'auto_draw_dead',
     turn_seconds: 'turn_seconds',
+    clock_seconds: 'clock_seconds',
     dead_cards: 'dead_cards',
     exchanges_per_turn: 'exchanges_per_turn',
 };
@@ -80,7 +81,7 @@ async function update({id, name, team_count, players_per_team, settings, client 
 }
 
 // {id, name, administrator, administrator_name, team_count, players_per_team, created_at, rounds_ended_at, matchmaking,
-//  settings: {mode, history, highlights, auto_draw_dead, turn_seconds, dead_cards, exchanges_per_turn},
+//  settings: {mode, history, highlights, auto_draw_dead, turn_seconds, clock_seconds, dead_cards, exchanges_per_turn},
 //  teams: [{handle, players: [{handle, name, bot?} | null]}]} or undefined. `bot` is only there (true) for a bot. `lock` holds the room row until the
 // transaction ends, which serialises joins, starts and settings changes.
 async function get({id, client = pool, lock = false}) {

@@ -106,6 +106,22 @@ describe_with_database('quick match', function () {
         expect((await agents.alice.get('/matchmaking/queue').expect(200)).body).toEqual({status: 'idle'});
     });
 
+    test('a blitz match gives each player a 5 minute clock for the whole game', async function () {
+        // Players of their own, so the others stay free for the tests after this one.
+        for (const handle of ['olga', 'pete']) await sign_up(handle);
+        expect((await queue('olga', {teams: 2, timer: 'blitz'}).expect(200)).body)
+            .toEqual(expect.objectContaining({status: 'queued', timer: 'blitz', clock_seconds: 300}));
+        const {body} = await queue('pete', {teams: 2, timer: 'blitz'}).expect(200);
+        expect(body.status).toBe('matched');
+        const room = (await agents.olga.get(`/room/${body.room_id}`).expect(200)).body;
+        expect(room).toEqual(expect.objectContaining({name: 'Quick Match · Blitz'}));
+        expect(room.settings.clock_seconds).toBe(300);
+        const game = (await agents.pete.get(`/room/${body.room_id}/game`).expect(200)).body;
+        expect(game.clocks).toEqual({seconds: 300, left_ms: [300000, 300000]});
+        // The time to open the game is on top of the clock, not taken from it.
+        expect(Date.parse(game.turn_deadline) - Date.parse(game.turn_started_at)).toBe(300000 + room_game.MATCH_START_GRACE_MS);
+    });
+
     test('seats two players who asked for the same table, one per team, and deals at once', async function () {
         await queue('alice', {teams: 2, timer: 'fast'}).expect(200);
         const {body} = await queue('bob', {teams: 2, timer: 'fast'}).expect(200);

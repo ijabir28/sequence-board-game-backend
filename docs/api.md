@@ -164,8 +164,8 @@ Players queue for a table shape and the server seats them with others who asked 
 [architecture](architecture.md#quick-match-and-bots).
 
 ### `POST /matchmaking/queue {teams, timer}` (auth)
-Joins the queue. `teams` is `2` or `3` (always one player per team); `timer` is `fast` (15 s turns), `medium` (45 s)
-or `slow` (90 s). Every other setting is the default of a new table. Asking again with another shape moves the player
+Joins the queue. `teams` is `2` or `3` (always one player per team); `timer` is `fast` (15 s turns), `medium` (45 s),
+`slow` (90 s) or `blitz` (a chess-style clock: 5 minutes for each player's whole game, see `clock_seconds`). Every other setting is the default of a new table. Asking again with another shape moves the player
 to that queue (keeping their place only for the same shape). Answers `200` with the status (below): `matched` at once
 when enough players were waiting, else `queued`; `playing` (and not queued) when the player already has a quick match in
 progress, which they should go back to. `400 INVALID_MATCH_SETTINGS`, `401 NOT_SIGNED_IN`.
@@ -174,7 +174,7 @@ progress, which they should go back to. `400 INVALID_MATCH_SETTINGS`, `401 NOT_S
 The status. A waiting page must call it every few seconds: a player not heard from for 30 seconds has left the queue.
 
 ```jsonc
-{"status": "queued", "teams": 2, "timer": "fast", "turn_seconds": 15,
+{"status": "queued", "teams": 2, "timer": "fast", "turn_seconds": 15, "clock_seconds": null,
  "joined_at": "…",                  // nothing says when bots would be brought in, or who else waits
  "server_time": "…"}
 {"status": "matching"}               // the table is being made: ask again
@@ -251,7 +251,7 @@ Rooms, seats, games and every move are stored in PostgreSQL, so tables and games
 
 ### `POST /room/create` (auth)
 Body `{number_of_team, number_of_player_in_each_team, name?, history?, highlights?, auto_draw_dead?,
-turn_seconds?, dead_cards?, exchanges_per_turn?}`. Counts are numbers or numeric strings; `turn_seconds` is a whole number from 15 to 600; `dead_cards` is `"manual"` or `"indicator"`;
+turn_seconds?, clock_seconds?, dead_cards?, exchanges_per_turn?}`. Counts are numbers or numeric strings; `turn_seconds` is a whole number from 15 to 600; `clock_seconds` is `null` or `"off"`, or a whole number from 60 to 3600; `dead_cards` is `"manual"` or `"indicator"`;
 `exchanges_per_turn` is `null` or `"unlimited"`, or a whole number from 1 to 10; the other settings are booleans (or
 `"true"` / `"false"`).
 `200 {id}`. `id` is the table's code: a slug of its name plus a 4-character suffix, such as `"friday-night-k3m9"`.
@@ -267,6 +267,7 @@ Settings and their defaults:
 | `history` | `false` | Off: `GET /room/:id/turns` is `403 HISTORY_DISABLED` and the GameView's `log` keeps only the latest move |
 | `highlights` | `false` | Off: clients don't light up legal cells (the server only reports the setting) |
 | `turn_seconds` | `90` | Seconds each player has for a turn. Clients offer 30, 60, 90, 120 and 180, or any whole number from 15 to 600 |
+| `clock_seconds` | `null` (off) | Blitz, a chess-style clock in place of `turn_seconds`: each team has this many seconds for the whole round, spent only during its own turns (not while paused). A team whose clock is out has a random card played for it at once on each of its turns. Clients offer 300 (5 minutes) |
 | `dead_cards` | `"manual"` | `"manual"`: nothing marks dead cards; players spot them and ask to exchange them, and the server refuses a card that isn't dead (`NOT_DEAD`). The GameView's `can_exchange` is then true whenever the current player has exchanges left, so it never gives a dead card away. `"indicator"`: clients mark dead cards in the hand, and `can_exchange` is true only when one is there |
 | `exchanges_per_turn` | `null` (unlimited) | How many dead cards a player may exchange in one turn: `null` for unlimited, or 1 to 10. Rooms created before this setting allow 1 |
 | `auto_draw_dead` | `false` | With `dead_cards: "indicator"` only. On: dead cards are exchanged automatically when their owner's turn starts (as many as `exchanges_per_turn` allows, counted as theirs), logged as `{kind: "exchange", auto: true, …}` |
@@ -426,6 +427,8 @@ false). Every move, forfeit and round decision refuses them (`401 NOT_SIGNED_IN`
   "turn_deadline": "2026-10-15T06:56:45.349Z",     // when the turn's timer runs out (null once the game is over or while paused)
   "turn_paused": false,              // the current player is away from the table, so their turn waits for them
   "turn_time_left_ms": null,         // while paused: the time the current player will have left; else null
+  "clocks": null,                    // blitz: {seconds, left_ms: [ms per team as the current turn began]}; the current
+                                     // team's clock runs down to turn_deadline. Null with a per-turn timer
   "away": ["sakib"],                 // seated players whose game page isn't open
   "presence_token": "q9…",           // seated players only: send it with the socket's join_game (null for spectators)
   "spectators": 2,                    // sockets watching without a seat (watch_game)

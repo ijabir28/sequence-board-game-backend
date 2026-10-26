@@ -64,9 +64,27 @@ async function find_game(id, client) {
     return {room, game};
 }
 
-// When the current turn's time is up: its start plus the room's turn_seconds plus the time it spent paused.
+// Blitz (a chess-style clock, see entity/room.js): `game.clocks` holds each team's time left in the round, in ms, as it
+// stood when the current turn began. Games without it use the room's per-turn timer.
+function has_clocks(game) {
+    return Array.isArray(game.clocks);
+}
+
+// How long the current turn may run, paused time aside: the current team's clock under blitz, else the turn timer.
+function turn_allowance_ms(room, game) {
+    if (has_clocks(game)) return Math.max(0, game.clocks[game.players[game.current].team]);
+    return room.settings.turn_seconds * 1000;
+}
+
+// A newly dealt round with every team's blitz clock full, when the room plays blitz.
+function with_clocks(room, dealt) {
+    if (room.settings.clock_seconds === null || room.settings.clock_seconds === undefined) return dealt;
+    return Object.assign({}, dealt, {clocks: Array(dealt.team_count).fill(room.settings.clock_seconds * 1000)});
+}
+
+// When the current turn's time is up: its start plus its allowance plus the time it spent paused.
 function turn_end(room, game) {
-    return Date.parse(game.turn_started_at) + room.settings.turn_seconds * 1000 + (game.turn_paused_ms || 0);
+    return Date.parse(game.turn_started_at) + turn_allowance_ms(room, game) + (game.turn_paused_ms || 0);
 }
 
 // When the current turn's timer runs out. Null once the game is over, while the turn is paused (its player is away
@@ -165,6 +183,9 @@ function view(room, game, handle, rounds) {
         // While the current player is away the turn is paused: no deadline, and the time they'll have left.
         turn_paused: Boolean(game.winner === null && game.turn_paused_at),
         turn_time_left_ms: paused_time_left(room, game),
+        // Blitz: each team's time left in the round (ms) as the current turn began; the current team's runs down to
+        // turn_deadline (or is turn_time_left_ms while paused). Null with a per-turn timer.
+        clocks: has_clocks(game) ? {seconds: room.settings.clock_seconds, left_ms: game.clocks} : null,
         away: away_players(room, game),
         // A seated player's game socket sends this to say they are at the table (see controller/presence.js).
         presence_token: seated ? presence.token_for(room.id, handle) : null,
@@ -174,11 +195,25 @@ function view(room, game, handle, rounds) {
     });
 }
 
+// Blitz: the clocks once `game`'s turn ends at `now`, its team's clock less the time the turn ran (not paused).
+function spend_clock(game, now) {
+    if (!game.turn_started_at) return game.clocks;
+    const stopped = game.turn_paused_at ? Date.parse(game.turn_paused_at) : now.getTime();
+    const used = Math.max(0, stopped - Date.parse(game.turn_started_at) - (game.turn_paused_ms || 0));
+    const team = game.players[game.current].team;
+    return game.clocks.map(function (left, index) {
+        return index === team ? Math.max(0, left - used) : left;
+    });
+}
+
 // The rules engine has no clock, so the time each turn started is stamped here, into the stored state (which
-// keeps it across restarts). An exchange keeps the turn, so it keeps the time too.
+// keeps it across restarts). An exchange keeps the turn, so it keeps the time too. Under blitz the turn that ended is
+// charged to its team's clock.
 function stamp_turn(previous, next, now = new Date()) {
     if (previous !== undefined && previous.turn === next.turn && previous.current === next.current) return next;
-    return Object.assign({}, next, {turn_started_at: now.toISOString(), turn_paused_at: null, turn_paused_ms: 0});
+    const stamped = {turn_started_at: now.toISOString(), turn_paused_at: null, turn_paused_ms: 0};
+    if (previous !== undefined && has_clocks(previous)) stamped.clocks = spend_clock(previous, now);
+    return Object.assign({}, next, stamped);
 }
 
 function signed_in_handle(req) {
@@ -199,7 +234,7 @@ const MATCH_START_GRACE_MS = 10000;
 async function deal_first_round(room, client, now = new Date()) {
     // Who moves first in round 1 is drawn at random; each later round passes it to the next seat.
     const first = random_first_seat(room.teams);
-    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: 1});
+    const dealt = with_clocks(room, Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: 1}));
     let created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
     // The time a turn spent paused is added to it, so this is extra time for the first turn.
     if (room.matchmaking) created = Object.assign({}, created, {turn_paused_ms: MATCH_START_GRACE_MS});
@@ -395,7 +430,7 @@ const next_round = host_decision(async function (room, current, client) {
     const now = new Date();
     // The first turn moves on to the next seat, so it goes to the other team (see next_first_seat()).
     const first = next_first_seat(current);
-    const dealt = Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: current.round + 1});
+    const dealt = with_clocks(room, Object.assign(create_game({teams: room.teams, rules: room.settings, first}), {round: current.round + 1}));
     const created = follow_presence(room, stamp_turn(undefined, dealt, now), now);
     await db_game.create({room_id: room.id, state: created, turn_deadline: turn_deadline(room, created), client});
     return {room, game: created};
@@ -555,14 +590,17 @@ async function presence_changed(room_id, now = new Date()) {
 }
 
 // How long a bot thinks before it moves: a few seconds, different every turn, as a person would, and always well
-// within the turn timer. BOT_THINK_MS is the shortest.
+// within the turn timer. Under blitz it spends at most a twentieth of its clock, so the clock lasts the round.
+// BOT_THINK_MS is the shortest.
 const BOT_THINK_MS = 1500;
 const BOT_THINK_MAX_MS = 7000;
 
 function bot_think_ms(room, game) {
     let hash = 0;
     for (const char of `${room.id}:${game.turn}`) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-    const longest = Math.max(BOT_THINK_MS, Math.min(BOT_THINK_MAX_MS, room.settings.turn_seconds * 1000 - 4000));
+    const allowance = turn_allowance_ms(room, game);
+    const budget = has_clocks(game) ? Math.min(allowance - 4000, allowance / 20) : allowance - 4000;
+    const longest = Math.max(BOT_THINK_MS, Math.floor(Math.min(BOT_THINK_MAX_MS, budget)));
     return BOT_THINK_MS + (hash % (longest - BOT_THINK_MS + 1));
 }
 

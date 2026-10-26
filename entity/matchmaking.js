@@ -3,13 +3,23 @@
 // server has and makes the tables.
 //
 // A queue entry is one player waiting for one configuration: a team count (one player per team, so no one shares a
-// team with a stranger) and a turn timer. As soon as enough players wait for the same configuration the oldest of
-// them are matched. A player who has waited BOT_AFTER_MS is matched with whoever else is waiting and bots in the
+// team with a stranger) and a timer (per turn, or the blitz clock). As soon as enough players wait for the same
+// configuration the oldest of them are matched. A player who has waited BOT_AFTER_MS is matched with whoever else is waiting and bots in the
 // empty seats. A waiting page checks in every few seconds; an entry not seen for STALE_AFTER_MS (the page was
 // closed) is dropped, so nobody is seated at a game they've left.
 
-/** Turn timer choices, in seconds. */
-const TIMERS = Object.freeze({fast: 15, medium: 45, slow: 90});
+const {BLITZ_CLOCK_SECONDS, DEFAULT_SETTINGS} = require('./room');
+
+/**
+ * Timer choices: seconds per turn, or for blitz a chess-style clock of `clock_seconds` per player for the whole game
+ * (see BLITZ_CLOCK_SECONDS in entity/room.js), which leaves the table's turn timer at its default.
+ */
+const TIMERS = Object.freeze({
+    fast: {turn_seconds: 15, clock_seconds: null},
+    medium: {turn_seconds: 45, clock_seconds: null},
+    slow: {turn_seconds: 90, clock_seconds: null},
+    blitz: {turn_seconds: DEFAULT_SETTINGS.turn_seconds, clock_seconds: BLITZ_CLOCK_SECONDS},
+});
 const TEAM_COUNTS = Object.freeze([2, 3]);
 
 /** How long a player waits for other people before bots fill the table. */
@@ -25,7 +35,7 @@ class MatchmakingError extends Error {
     }
 }
 
-/** {teams, timer, turn_seconds} from a request body {teams, timer}. Throws INVALID_MATCH_SETTINGS. */
+/** {teams, timer, turn_seconds, clock_seconds} from a request body {teams, timer}. Throws INVALID_MATCH_SETTINGS. */
 function parse_config(body = {}) {
     const teams = Number(body.teams);
     if (!TEAM_COUNTS.includes(teams)) {
@@ -33,9 +43,9 @@ function parse_config(body = {}) {
     }
     const timer = String(body.timer);
     if (!Object.prototype.hasOwnProperty.call(TIMERS, timer)) {
-        throw new MatchmakingError('INVALID_MATCH_SETTINGS', 'Choose a turn timer: fast (15 s), medium (45 s) or slow (90 s).');
+        throw new MatchmakingError('INVALID_MATCH_SETTINGS', 'Choose a timer: fast (15 s turns), medium (45 s), slow (90 s) or blitz (5 min each).');
     }
-    return {teams, timer, turn_seconds: TIMERS[timer]};
+    return Object.assign({teams, timer}, TIMERS[timer]);
 }
 
 function config_key(config) {

@@ -2,6 +2,7 @@ const {
     RoomError,
     DEFAULT_SETTINGS,
     TURN_TIMER_PRESETS,
+    BLITZ_CLOCK_SECONDS,
     generate_name,
     normalize_name,
     slugify,
@@ -68,7 +69,7 @@ describe('settings', function () {
         expect(parse_settings({})).toEqual(DEFAULT_SETTINGS);
         expect(DEFAULT_SETTINGS).toEqual({
             history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
-            dead_cards: 'manual', exchanges_per_turn: null,
+            clock_seconds: null, dead_cards: 'manual', exchanges_per_turn: null,
         });
     });
 
@@ -96,6 +97,20 @@ describe('settings', function () {
         for (const bad of [14, 601, 30.5, '', 'fast', null, true]) {
             expect(function () {
                 parse_settings({turn_seconds: bad});
+            }).toThrow(expect.objectContaining({code: 'INVALID_SETTINGS'}));
+        }
+    });
+
+    test('reads the blitz clock: off by default, "off", or any whole number of seconds from 60 to 3600', function () {
+        expect(DEFAULT_SETTINGS.clock_seconds).toBe(null);
+        expect(BLITZ_CLOCK_SECONDS).toBe(300);
+        expect(parse_settings({clock_seconds: 300}).clock_seconds).toBe(300);
+        expect(parse_settings({clock_seconds: '60'}).clock_seconds).toBe(60);
+        expect(parse_settings({clock_seconds: 'off'}, {clock_seconds: 300}).clock_seconds).toBe(null);
+        expect(parse_settings({clock_seconds: null}, {clock_seconds: 300}).clock_seconds).toBe(null);
+        for (const bad of [59, 3601, 90.5, '', 'blitz', true]) {
+            expect(function () {
+                parse_settings({clock_seconds: bad});
             }).toThrow(expect.objectContaining({code: 'INVALID_SETTINGS'}));
         }
     });

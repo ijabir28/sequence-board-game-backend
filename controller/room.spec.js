@@ -100,7 +100,7 @@ describe_with_database('rooms and table games', function () {
             expect(room.name).toBe('Friday Night Café');
             expect(room.settings).toEqual({
                 history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
-                dead_cards: 'manual', exchanges_per_turn: null,
+                clock_seconds: null, dead_cards: 'manual', exchanges_per_turn: null,
             });
         });
 
@@ -129,7 +129,7 @@ describe_with_database('rooms and table games', function () {
             const room = (await request(app).get(`/room/${response.body.id}`)).body;
             expect(room.settings).toEqual({
                 history: false, highlights: false, auto_draw_dead: true, turn_seconds: 90,
-                dead_cards: 'manual', exchanges_per_turn: null,
+                clock_seconds: null, dead_cards: 'manual', exchanges_per_turn: null,
             });
             const bad = await agents.alice.post('/room/create').send({number_of_team: 2, number_of_player_in_each_team: 1, dead_cards: 'easy'});
             expect([bad.status, bad.body.error]).toEqual([400, 'INVALID_SETTINGS']);
@@ -584,6 +584,93 @@ describe_with_database('rooms and table games', function () {
         });
     });
 
+    describe('blitz clock', function () {
+        async function blitz_game() {
+            const id = await open_room('alice', 2, 1, {clock_seconds: 300});
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_2');
+            at_table(id, 'alice', 'bob');
+            const started = (await agents.alice.post(`/room/${id}/start`).expect(200)).body;
+            return {id, started};
+        }
+
+        // Moves the current turn's start `ms` into the past, as if the player had been thinking that long.
+        function think(id, ms) {
+            return database.pool.query(
+                "UPDATE games SET state = jsonb_set(state, '{turn_started_at}', to_jsonb(to_char((now() - $2 * interval '1 millisecond') AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'))) WHERE room_id = $1",
+                [id, ms]
+            );
+        }
+
+        test('a host can turn it on and off, within range', async function () {
+            const id = await open_room('alice', 2, 1, {clock_seconds: '300'});
+            expect((await agents.alice.get(`/room/${id}`).expect(200)).body.settings.clock_seconds).toBe(300);
+            await agents.alice.patch(`/room/${id}/settings`).send({clock_seconds: 'off'}).expect(200);
+            expect((await agents.alice.get(`/room/${id}`).expect(200)).body.settings.clock_seconds).toBe(null);
+            for (const clock_seconds of [30, 3601, 90.5, 'soon']) {
+                const {body} = await agents.alice.post('/room/create')
+                    .send({number_of_team: 2, number_of_player_in_each_team: 1, clock_seconds}).expect(400);
+                expect(body.error).toBe('INVALID_SETTINGS');
+            }
+            // A table without it keeps the per-turn timer.
+            const plain = await open_room('alice', 2, 1);
+            expect((await agents.alice.get(`/room/${plain}`).expect(200)).body.settings.clock_seconds).toBe(null);
+        });
+
+        test('each team starts with the whole clock, and only its own turns spend it', async function () {
+            const {id, started} = await blitz_game();
+            expect(started.clocks).toEqual({seconds: 300, left_ms: [300000, 300000]});
+            expect(Date.parse(started.turn_deadline) - Date.parse(started.turn_started_at)).toBe(300000);
+
+            const before = await require('../database/games').get({room_id: id});
+            const mover = before.players[before.current].team;
+            await think(id, 10000);
+            const move = await legal_play(id);
+            const played = (await agents[move.handle].post(`/room/${id}/game/play`).send(move.body).expect(200)).body;
+            const left = played.clocks.left_ms;
+            // The mover's clock lost the ten seconds (and the moment the request took); the other team's is untouched.
+            expect(left[mover]).toBeLessThanOrEqual(290000);
+            expect(left[mover]).toBeGreaterThan(285000);
+            expect(left[1 - mover]).toBe(300000);
+            expect(Date.parse(played.turn_deadline) - Date.parse(played.turn_started_at)).toBe(300000);
+            const stored = await require('../database/games').get_deadline({room_id: id});
+            expect(stored.toISOString()).toBe(played.turn_deadline);
+        });
+
+        test('a team out of time has a random card played at once on its turns', async function () {
+            const {id} = await blitz_game();
+            const before = await require('../database/games').get({room_id: id});
+            const team = before.players[before.current].team;
+            // The current team has a second left, and has been thinking for two.
+            await database.pool.query(
+                `UPDATE games SET state = jsonb_set(state, '{clocks,${team}}', '1000') WHERE room_id = $1`, [id]
+            );
+            await think(id, 2000);
+            await database.pool.query("UPDATE games SET turn_deadline = now() - interval '1 second' WHERE room_id = $1", [id]);
+            expect(await room_game_module.expire_turn(id)).toBe(true);
+
+            const after = await require('../database/games').get({room_id: id});
+            expect(after.turn).toBe(before.turn + 1);
+            expect(after.clocks[team]).toBe(0);
+            expect(after.clocks[1 - team]).toBe(300000);
+
+            // The other team plays; the flagged team's next turn is due as soon as it starts.
+            const move = await legal_play(id);
+            const played = (await agents[move.handle].post(`/room/${id}/game/play`).send(move.body).expect(200)).body;
+            expect(played.turn_deadline).toBe(played.turn_started_at);
+            expect(await room_game_module.expire_turn(id)).toBe(true);
+        });
+
+        test('a paused turn spends none of the clock', async function () {
+            const id = await open_room('alice', 2, 1, {clock_seconds: 300});
+            await join('alice', id, 'TEAM_1');
+            await join('bob', id, 'TEAM_2');
+            // Nobody has the game open, so the first turn starts paused.
+            const started = (await agents.alice.post(`/room/${id}/start`).expect(200)).body;
+            expect(started).toMatchObject({turn_paused: true, turn_deadline: null, turn_time_left_ms: 300000});
+        });
+    });
+
     describe('rounds', function () {
         // Sets the current round up so the player whose turn it is wins with their next move: their team already has
         // a sequence (row 8) and four chips in row 1, and their first card is 4-Spade, which goes on (1, 5) and
@@ -906,7 +993,7 @@ describe_with_database('rooms and table games', function () {
             expect(started.body.name).toBe('Quiet');
             expect(started.body.settings).toEqual({
                 history: false, highlights: false, auto_draw_dead: false, turn_seconds: 90,
-                dead_cards: 'manual', exchanges_per_turn: null,
+                clock_seconds: null, dead_cards: 'manual', exchanges_per_turn: null,
             });
 
             for (let i = 0; i < 3; i++) {
