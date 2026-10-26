@@ -64,15 +64,16 @@ async function create({make_id, name, administrator_id, team_count, players_per_
     }
 }
 
-// Changes a room's name and settings. Call inside the transaction that checked the game hasn't started.
-async function update({id, name, settings, client = pool}) {
+// Changes a room's name, size and settings. Call inside the transaction that checked the game hasn't started; the
+// caller moves players out of seats a smaller table no longer has.
+async function update({id, name, team_count, players_per_team, settings, client = pool}) {
     const keys = Object.keys(SETTING_COLUMNS);
     await client.query(
-        `UPDATE rooms SET name = $2, ${keys.map(function (key, i) {
-            return `${SETTING_COLUMNS[key]} = $${i + 3}`;
+        `UPDATE rooms SET name = $2, team_count = $3, players_per_team = $4, ${keys.map(function (key, i) {
+            return `${SETTING_COLUMNS[key]} = $${i + 5}`;
         }).join(', ')}
          WHERE id = $1`,
-        [String(id), name].concat(keys.map(function (key) {
+        [String(id), name, team_count, players_per_team].concat(keys.map(function (key) {
             return settings[key];
         }))
     );

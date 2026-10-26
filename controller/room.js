@@ -5,7 +5,7 @@ const db_game = require('../database/games');
 const db_friends = require('../database/friends');
 const {transaction} = require('../database/pool');
 const {is_supported_table} = require('../entity/sequence_game');
-const {RoomError, normalize_name, generate_slug, parse_settings, shuffle_seats} = require('../entity/room');
+const {RoomError, normalize_name, generate_slug, parse_settings, shuffle_seats, resize_seats} = require('../entity/room');
 const socket_server = require('../socket');
 const table_chat = require('./table_chat');
 
@@ -42,8 +42,9 @@ async function create(req, res) {
 }
 
 /**
- * PATCH /room/:id/settings {name?, history?, highlights?, auto_draw_dead?}: only the table's creator, and only
- * before the game starts. 200 with the room; missing keys keep their value.
+ * PATCH /room/:id/settings {name?, number_of_team?, number_of_player_in_each_team?, history?, highlights?, ...}: only
+ * the table's creator, and only before the game starts. 200 with the room; missing keys keep their value. Resizing the
+ * table keeps every seat that still exists and moves the players of dropped seats to open ones (see resize_seats).
  */
 async function update_settings(req, res) {
     const handle = req.handle;
@@ -63,7 +64,25 @@ async function update_settings(req, res) {
             throw new RoomError('GAME_ALREADY_STARTED', "The game has started, so the table's settings are fixed.");
         }
         const name = req.body.name === undefined ? room.name : normalize_name(req.body.name);
-        await db_room.update({id, name, settings: parse_settings(req.body, room.settings), client});
+        const team_count = req.body.number_of_team === undefined ? room.team_count : Number(req.body.number_of_team);
+        const players_per_team = req.body.number_of_player_in_each_team === undefined
+            ? room.players_per_team : Number(req.body.number_of_player_in_each_team);
+        if (!is_supported_table(team_count, players_per_team)) {
+            throw new RoomError('UNSUPPORTED_TABLE', `A game can't be dealt for ${team_count} teams of ${players_per_team}.`);
+        }
+        const settings = parse_settings(req.body, room.settings);
+        await db_room.update({id, name, team_count, players_per_team, settings, client});
+        if (team_count !== room.team_count || players_per_team !== room.players_per_team) {
+            const seated = room.teams.flatMap(function (team, index) {
+                return team.players.flatMap(function (player, seat) {
+                    return player === null ? [] : [{team: index, seat, player: room.seated_user_ids[player.handle]}];
+                });
+            });
+            const seats = resize_seats(seated, team_count, players_per_team).map(function ({team, seat, player}) {
+                return {team, seat, user_id: player};
+            });
+            await db_room.reseat({id, seats, client});
+        }
     });
     res.send(await room_payload({id}));
     await broadcast_room({id});
