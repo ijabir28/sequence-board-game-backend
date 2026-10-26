@@ -178,6 +178,29 @@ describe_with_database('rooms and table games', function () {
                 });
             })).toEqual([['alice', null], ['bob', null]]);
 
+            const socket_server = require('../socket');
+            const sent = jest.spyOn(socket_server, 'broadcast');
+            const burst = await Promise.all([[2, 1], [3, 1], [2, 2]].map(function ([teams, per_team]) {
+                return agents.alice.patch(`/room/${id}/settings`).send({number_of_team: teams, number_of_player_in_each_team: per_team});
+            }));
+            expect(burst.map(function (r) {
+                return r.status;
+            })).toEqual([200, 200, 200]);
+            // Wait for the broadcasts to settle: everyone ends on the room as it is, and pages need no fetch of their own.
+            const final = (await agents.alice.get(`/room/${id}`)).body;
+            await new Promise(function (resolve) {
+                setTimeout(resolve, 200);
+            });
+            const updates = sent.mock.calls.map(function ([call]) {
+                return call;
+            }).filter(function (call) {
+                return call.event === 'room_updated';
+            });
+            sent.mockRestore();
+            expect(updates.length).toBeGreaterThan(0);
+            expect(updates.length).toBeLessThanOrEqual(3);
+            expect(JSON.parse(JSON.stringify(updates[updates.length - 1].data))).toEqual(final);
+
             const odd = await agents.alice.patch(`/room/${id}/settings`).send({number_of_team: 3, number_of_player_in_each_team: 5});
             expect([odd.status, odd.body.error]).toEqual([400, 'UNSUPPORTED_TABLE']);
             expect((await agents.bob.patch(`/room/${id}/settings`).send({number_of_team: 3})).body.error).toBe('NOT_HOST');

@@ -331,9 +331,19 @@ async function leave({id, user, client}) {
 // room and checked the game hasn't started.
 async function reseat({id, seats, client}) {
     await client.query('DELETE FROM room_seats WHERE room_id = $1', [String(id)]);
-    for (const {team, seat, user_id} of seats) {
-        await client.query('INSERT INTO room_seats (room_id, team, seat, user_id) VALUES ($1, $2, $3, $4)', [String(id), team, seat, user_id]);
-    }
+    if (seats.length === 0) return;
+    // One statement for every seat: each query is a round trip to the database, which is far away in production.
+    await client.query(
+        `INSERT INTO room_seats (room_id, team, seat, user_id)
+         SELECT $1, team, seat, user_id FROM unnest($2::INT[], $3::INT[], $4::BIGINT[]) AS s(team, seat, user_id)`,
+        [String(id), seats.map(function (s) {
+            return s.team;
+        }), seats.map(function (s) {
+            return s.seat;
+        }), seats.map(function (s) {
+            return s.user_id;
+        })]
+    );
 }
 
 // The rooms a user created, sat at or came to, newest first (ties by code, so pages never overlap).

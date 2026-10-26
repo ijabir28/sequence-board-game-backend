@@ -84,8 +84,10 @@ async function update_settings(req, res) {
             await db_room.reseat({id, seats, client});
         }
     });
-    res.send(await room_payload({id}));
-    await broadcast_room({id});
+    // One read answers the host and goes out to everyone else, instead of reading the room twice more.
+    const read = await read_for_broadcast({id});
+    res.send(read.payload);
+    await broadcast_room({id, read});
 }
 
 /** POST /room/:id/join {team_handle}: always 200 {message}, see docs/api.md. */
@@ -499,11 +501,11 @@ function start_open_table_cleanup({interval_ms = OPEN_TABLE_SWEEP_MS} = {}) {
 }
 
 async function room_payload({id}) {
-    const room = await db_room.get({id});
+    // Independent reads, so they share one round trip to the database instead of taking three in turn.
+    const [room, game, people] = await Promise.all([db_room.get({id}), db_game.get({room_id: id}), db_room.people({id})]);
     if (room === undefined) {
         return undefined;
     }
-    const game = await db_game.get({room_id: id});
     return {
         id: room.id,
         name: room.name,
@@ -519,7 +521,7 @@ async function room_payload({id}) {
             });
         }),
         // Who is around the table without a seat: stood up, or invited and not yet sat down.
-        ...await db_room.people({id}),
+        ...people,
         created_at: room.created_at,
         game_started: game !== undefined,
         // The round being played (or just won), and whether the host has ended the rounds.
@@ -528,8 +530,60 @@ async function room_payload({id}) {
     };
 }
 
-async function broadcast_room({id}) {
-    socket_server.broadcast({event: 'room_updated', data: await room_payload({id})});
+// Per table: how many broadcast reads have started, the newest one sent, how many are still reading, and whether a
+// broadcast is running and another change landed meanwhile. Forgotten once nothing is reading.
+const broadcasts = new Map();
+
+function broadcast_state(id) {
+    const key = String(id);
+    if (!broadcasts.has(key)) broadcasts.set(key, {started: 0, sent: 0, reading: 0, running: false, again: false});
+    return broadcasts.get(key);
+}
+
+/** Reads the room for a broadcast, numbered: a read that started later sees every change committed before it. */
+async function read_for_broadcast({id}) {
+    const state = broadcast_state(id);
+    const seq = ++state.started;
+    state.reading += 1;
+    try {
+        return {seq, payload: await room_payload({id})};
+    } finally {
+        state.reading -= 1;
+    }
+}
+
+function send_broadcast({id, state, read}) {
+    if (read.seq > state.sent) {
+        state.sent = read.seq;
+        socket_server.broadcast({event: 'room_updated', data: read.payload});
+    }
+    if (!state.running && state.reading === 0) broadcasts.delete(String(id));
+}
+
+/**
+ * Sends everyone the room as it is now (`room_updated`, which pages show without fetching it again). `read` is a
+ * read_for_broadcast() taken after the change, which saves reading the room again. A burst of changes (a host clicking
+ * through the table size) reads the room at most twice: the read running, then one more. A read that finishes after a
+ * newer one was sent is dropped, so the last room everyone gets is the latest.
+ */
+async function broadcast_room({id, read}) {
+    const state = broadcast_state(id);
+    if (read !== undefined) return send_broadcast({id, state, read});
+    if (state.running) {
+        state.again = true;
+        return;
+    }
+    state.running = true;
+    try {
+        do {
+            state.again = false;
+            const next = await read_for_broadcast({id});
+            if (!state.again) state.running = false;
+            send_broadcast({id, state, read: next});
+        } while (state.running);
+    } finally {
+        state.running = false;
+    }
 }
 
 async function room(req, res) {
